@@ -491,6 +491,7 @@
         <button type="button" class="az-nav-item" data-panel="clienti">🧑‍🤝‍🧑 Clienti</button>
         <button type="button" class="az-nav-item" data-panel="presenti">👥 Presenti</button>
         <button type="button" class="az-nav-item" data-panel="newsletter">📧 Newsletter</button>
+        <button type="button" class="az-nav-item" data-panel="messaggi">📬 Messaggi</button>
       </div>
       <div class="az-nav-group">
         <p class="az-nav-group-label">Contenuti</p>
@@ -606,6 +607,26 @@
         </table>
       </div>
       <p class="az-empty" id="az-attendees-empty" hidden>Nessun nominativo trovato.</p>
+    </div>
+
+    <!-- Messaggi dal form contatti del sito -->
+    <div class="az-panel" data-panel-content="messaggi" hidden>
+      <div class="az-toolbar">
+        <input type="text" class="az-search" id="az-msgs-search" placeholder="Cerca nome, email o testo...">
+        <select id="az-msgs-status-filter">
+          <option value="open">Da gestire (nuovi + letti)</option>
+          <option value="new">Solo nuovi</option>
+          <option value="done">Gestiti</option>
+          <option value="all">Tutti</option>
+        </select>
+        <div class="actions">
+          <span class="az-count" id="az-msgs-count"></span>
+          <button type="button" class="az-mini-btn" id="az-msgs-refresh">🔄 Aggiorna</button>
+        </div>
+      </div>
+      <p class="az-msg" id="az-msgs-msg" hidden></p>
+      <div id="az-msgs-list"></div>
+      <p class="az-empty" id="az-msgs-empty" hidden>Nessun messaggio.</p>
     </div>
 
     <!-- Newsletter -->
@@ -1923,6 +1944,89 @@
       applyAttendeesFilter();
     } catch (err) { document.getElementById('az-attendees-count').textContent = 'Errore di connessione.'; }
   }
+  // ---- Messaggi dal form contatti ----
+  var allContactMsgs = [];
+  var contactReasons = {};
+  function fmtMsgDate(iso){
+    var d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleDateString('it-IT', { day:'numeric', month:'short', year:'numeric' }) + ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+  }
+  function renderContactMsgs(){
+    var q = document.getElementById('az-msgs-search').value.trim().toLowerCase();
+    var f = document.getElementById('az-msgs-status-filter').value;
+    var list = allContactMsgs.filter(function(m){
+      if (f === 'open' && m.status === 'done') return false;
+      if (f === 'new' && m.status !== 'new') return false;
+      if (f === 'done' && m.status !== 'done') return false;
+      return !q || (m.name + ' ' + m.email + ' ' + m.message).toLowerCase().indexOf(q) !== -1;
+    });
+    var nNew = allContactMsgs.filter(function(m){ return m.status === 'new'; }).length;
+    document.getElementById('az-msgs-count').textContent = list.length + ' messaggi' + (nNew ? ' · ' + nNew + ' nuovi' : '');
+    document.getElementById('az-msgs-empty').hidden = list.length > 0;
+    document.getElementById('az-msgs-list').innerHTML = list.map(function(m){
+      var badge = m.status === 'new' ? '<span style="background:#FF5B3A; color:#fff; border-radius:99px; padding:2px 9px; font-size:11px; font-weight:700; margin-left:8px;">NUOVO</span>'
+                : m.status === 'done' ? '<span style="color:#1E7A3A; font-size:12px; margin-left:8px;">✓ gestito</span>' : '';
+      var subject = encodeURIComponent('Re: il tuo messaggio a GrowMi');
+      return '<div class="az-card" data-msg-id="' + esc(m.id) + '" style="border:1.5px solid var(--line); border-radius:14px; background:#fff; padding:16px 18px; margin-bottom:12px;">' +
+        '<div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">' +
+          '<div><strong>' + esc(m.name) + '</strong>' + badge + '<br><a href="mailto:' + esc(m.email) + '?subject=' + subject + '">' + esc(m.email) + '</a></div>' +
+          '<div style="font-size:12px; color:var(--grey); text-align:right;">' + esc(fmtMsgDate(m.createdAt)) + '<br>' + esc(contactReasons[m.reason] || m.reason) + '</div>' +
+        '</div>' +
+        '<p style="white-space:pre-wrap; margin:12px 0; font-size:14px;">' + esc(m.message) + '</p>' +
+        '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
+          '<a class="az-mini-btn" style="text-decoration:none;" href="mailto:' + esc(m.email) + '?subject=' + subject + '" data-msg-reply="' + esc(m.id) + '">✉️ Rispondi</a>' +
+          (m.status !== 'done' ? '<button type="button" class="az-mini-btn" data-msg-status="done">✓ Segna come gestito</button>' : '<button type="button" class="az-mini-btn" data-msg-status="new">↩︎ Riapri</button>') +
+          (m.status === 'new' ? '<button type="button" class="az-mini-btn" data-msg-status="read">Segna come letto</button>' : '') +
+          '<button type="button" class="az-mini-btn" data-msg-delete style="color:#B4400F;">🗑 Elimina</button>' +
+        '</div></div>';
+    }).join('');
+  }
+  async function loadContactMsgs(){
+    var msgEl = document.getElementById('az-msgs-msg');
+    try {
+      var res = await fetch('/api/admin/contact-messages');
+      var data = await res.json();
+      if (!res.ok) { showMsg(msgEl, data.error || 'Errore nel caricamento.', true); return; }
+      msgEl.hidden = true;
+      allContactMsgs = data.messages || [];
+      contactReasons = data.reasons || {};
+      renderContactMsgs();
+    } catch (err) { showMsg(msgEl, 'Errore di connessione.', true); }
+  }
+  async function setContactStatus(id, status){
+    var msgEl = document.getElementById('az-msgs-msg');
+    try {
+      var res = await fetch('/api/admin/contact-messages', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, status: status }) });
+      var data = await res.json();
+      if (!res.ok) { showMsg(msgEl, data.error || 'Errore.', true); return; }
+      allContactMsgs.forEach(function(m){ if (m.id === id) m.status = status; });
+      renderContactMsgs();
+    } catch (err) { showMsg(msgEl, 'Errore di connessione.', true); }
+  }
+  panelLoaders.messaggi = { loaded: false, load: loadContactMsgs };
+  document.getElementById('az-msgs-search').addEventListener('input', renderContactMsgs);
+  document.getElementById('az-msgs-status-filter').addEventListener('change', renderContactMsgs);
+  document.getElementById('az-msgs-refresh').addEventListener('click', loadContactMsgs);
+  document.getElementById('az-msgs-list').addEventListener('click', async function(e){
+    var card = e.target.closest('[data-msg-id]');
+    if (!card) return;
+    var id = card.getAttribute('data-msg-id');
+    var st = e.target.closest('[data-msg-status]');
+    if (st) { setContactStatus(id, st.getAttribute('data-msg-status')); return; }
+    // "Rispondi" apre il client mail: se il messaggio era nuovo lo segno come letto.
+    if (e.target.closest('[data-msg-reply]')) {
+      var m = allContactMsgs.find(function(x){ return x.id === id; });
+      if (m && m.status === 'new') setContactStatus(id, 'read');
+      return;
+    }
+    if (e.target.closest('[data-msg-delete]')) {
+      if (!confirm('Eliminare definitivamente questo messaggio?')) return;
+      var res = await fetch('/api/admin/contact-messages?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      if (res.ok) { allContactMsgs = allContactMsgs.filter(function(x){ return x.id !== id; }); renderContactMsgs(); }
+      else showMsg(document.getElementById('az-msgs-msg'), 'Impossibile eliminare.', true);
+    }
+  });
+
   panelLoaders.presenti = { loaded: false, load: loadAttendees };
   document.getElementById('az-attendees-export').addEventListener('click', async function(){
     await downloadCsv('/api/export-attendees', 'growmi-partecipanti.csv', this, '💾 Esporta CSV');

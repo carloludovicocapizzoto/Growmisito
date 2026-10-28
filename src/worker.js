@@ -1094,6 +1094,30 @@ async function handleFetch(request, env, ctx) {
       }
     }
 
+    // Form contatti pubblico (contatti.html): prima era un modulo Netlify, che su Cloudflare
+    // non riceve niente — i messaggi non arrivavano da nessuna parte. Ora finiscono in KV
+    // (contact:<id>), visibili in azienda.html → Messaggi, e arriva anche una mail di avviso.
+    if (url.pathname === "/api/contact" && request.method === "POST") {
+      const rl = await checkRateLimit(env, "RL_AUTH", request, "contact");
+      if (rl) return rl;
+      try {
+        return await handleContactSubmit(request, env);
+      } catch (err) {
+        console.log("Errore contact:", err.stack || err.message);
+        return jsonResponse({ error: "Qualcosa è andato storto, riprova." }, 500);
+      }
+    }
+    if (url.pathname === "/api/admin/contact-messages") {
+      try {
+        if (request.method === "GET") return await handleAdminListContactMessages(request, env);
+        if (request.method === "PUT") return await handleAdminUpdateContactMessage(request, env);
+        if (request.method === "DELETE") return await handleAdminDeleteContactMessage(request, env);
+      } catch (err) {
+        console.log("Errore admin/contact-messages:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     if ((url.pathname === "/" || url.pathname === "/index.html") && request.method === "GET") {
       try {
         const handled = await handleHomePage(request, env);
@@ -1316,6 +1340,91 @@ function normalizeSponsorLogo(raw) {
 // di già live. Solo published:false esplicito lo tiene in bozza.
 function isEventPublished(event) {
   return event.published !== false;
+}
+
+// ============================================================================
+// Messaggi dal form contatti (contatti.html) — KV contact:<id>, status "new" | "read" | "done".
+// ============================================================================
+const CONTACT_REASONS = { artista: "Sono un artista", locale: "Sono un locale", evento: "Domanda su un evento", booking: "Richiesta artista per un evento", staff: "Voglio entrare nello staff", supporter: "Financial supporter", altro: "Altro" };
+
+async function handleContactSubmit(request, env) {
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: "richiesta non valida" }, 400); }
+  // Campo trappola per i bot (nascosto in pagina): se compilato fingo che sia andato tutto bene.
+  if (String(body["bot-field"] || "").trim()) return jsonResponse({ ok: true });
+  const name = String(body.nome || "").trim().slice(0, 100);
+  const email = String(body.email || "").trim().slice(0, 200);
+  const message = String(body.messaggio || "").trim().slice(0, 4000);
+  const reason = Object.prototype.hasOwnProperty.call(CONTACT_REASONS, body.motivo) ? body.motivo : "altro";
+  if (!name || !message || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return jsonResponse({ error: "Compila nome, email valida e messaggio." }, 400);
+  }
+  const createdAt = new Date().toISOString();
+  const id = `${createdAt.replace(/[^0-9]/g, "")}-${crypto.randomUUID().slice(0, 6)}`;
+  await env.TICKETS.put(`contact:${id}`, JSON.stringify({ id, name, email, reason, message, createdAt, status: "new" }));
+
+  // Avviso allo staff (mai bloccante: il messaggio è già salvato). reply_to = chi ha scritto,
+  // così "Rispondi" nella mail va dritto a lui/lei.
+  if (env.RESEND_API_KEY) {
+    try {
+      const esc = function(t){ return String(t).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      const r = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "GrowMi <noreply@growmi.it>", to: "grow.mi@outlook.it", reply_to: email,
+          subject: `Nuovo messaggio dal sito — ${CONTACT_REASONS[reason]}`,
+          html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+            `<p><strong>${esc(name)}</strong> (${esc(email)}) — ${esc(CONTACT_REASONS[reason])}</p>` +
+            `<p style="white-space:pre-wrap;">${esc(message)}</p>` +
+            `<p style="color:#6E6478; font-size:13px;">Lo trovi anche nel pannello admin → Messaggi.</p></div>`
+        })
+      });
+      if (!r.ok) console.log("Resend contact notify error:", r.status, await r.text());
+    } catch (e) { console.log("Errore avviso messaggio contatti:", e.message); }
+  }
+  return jsonResponse({ ok: true });
+}
+
+async function handleAdminListContactMessages(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const messages = [];
+  let cursor = undefined;
+  do {
+    const page = await env.TICKETS.list({ prefix: "contact:", cursor });
+    for (const key of page.keys) {
+      const raw = await env.TICKETS.get(key.name);
+      if (raw) messages.push(JSON.parse(raw));
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  messages.sort(function(a, b){ return (b.createdAt || "").localeCompare(a.createdAt || ""); });
+  return jsonResponse({ messages, reasons: CONTACT_REASONS });
+}
+
+async function handleAdminUpdateContactMessage(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  const { id, status } = await request.json();
+  if (!["new", "read", "done"].includes(status)) return jsonResponse({ error: "stato non valido" }, 400);
+  const raw = await env.TICKETS.get(`contact:${String(id || "")}`);
+  if (!raw) return jsonResponse({ error: "messaggio non trovato" }, 404);
+  const msg = JSON.parse(raw);
+  msg.status = status;
+  await env.TICKETS.put(`contact:${msg.id}`, JSON.stringify(msg));
+  return jsonResponse({ ok: true, message: msg });
+}
+
+async function handleAdminDeleteContactMessage(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  const id = String(new URL(request.url).searchParams.get("id") || "");
+  if (!id) return jsonResponse({ error: "id mancante" }, 400);
+  await env.TICKETS.delete(`contact:${id}`);
+  return jsonResponse({ ok: true });
 }
 
 // Elenco pubblico eventi (nessuna autenticazione: sono gli stessi dati già visibili sul sito)

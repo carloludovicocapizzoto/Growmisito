@@ -70,11 +70,10 @@
 <section>
   <div class="wrap contact-grid">
     <div>
-      <!-- Modulo gestito automaticamente da Netlify (nessun backend necessario).
-           Funziona SOLO una volta pubblicato su Netlify: le risposte arrivano
-           nella dashboard Netlify → Forms. In locale non invia nulla. -->
-      <form name="contatto-growmi" method="POST" data-netlify="true" netlify-honeypot="bot-field">
-        <input type="hidden" name="form-name" value="contatto-growmi">
+      <!-- Invia a /api/contact (Worker): il messaggio finisce in KV, visibile nel pannello
+           admin → Messaggi, e parte una mail di avviso. Il vecchio modulo Netlify non
+           riceveva niente da quando il sito è su Cloudflare. -->
+      <form id="ct-form" name="contatto-growmi" method="POST">
         <p style="display:none;"><label>Non compilare: <input name="bot-field"></label></p>
 
         <div class="field">
@@ -102,6 +101,7 @@
           <textarea name="messaggio" required></textarea>
         </div>
         <button type="submit" class="btn coral block" data-i18n="ct_send">Invia messaggio</button>
+        <p id="ct-status" role="status" style="margin-top:14px; font-size:15px;" hidden></p>
       </form>
     </div>
 
@@ -279,6 +279,35 @@
     if(motivo && select && select.querySelector('option[value="' + motivo + '"]')){
       select.value = motivo;
     }
+
+    var form = document.getElementById('ct-form');
+    var status = document.getElementById('ct-status');
+    var T = {
+      it: { ok: 'Messaggio inviato! Ti rispondiamo il prima possibile.', err: 'Non siamo riusciti a inviare il messaggio. Riprova o scrivici a grow.mi@outlook.it.' },
+      en: { ok: 'Message sent! We\'ll get back to you as soon as possible.', err: 'We couldn\'t send your message. Try again or write to grow.mi@outlook.it.' }
+    };
+    form.addEventListener('submit', async function(e){
+      e.preventDefault();
+      var lang = 'it';
+      try { lang = localStorage.getItem('growmi_lang') === 'en' ? 'en' : 'it'; } catch(err) {}
+      var btn = form.querySelector('button[type="submit"]');
+      var data = {};
+      new FormData(form).forEach(function(v, k){ data[k] = v; });
+      btn.disabled = true;
+      status.hidden = true;
+      try {
+        var res = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        if (!res.ok) throw new Error('http ' + res.status);
+        form.reset();
+        status.textContent = T[lang].ok;
+        status.style.color = '';
+      } catch (err) {
+        status.textContent = T[lang].err;
+        status.style.color = '#B4400F';
+      }
+      status.hidden = false;
+      btn.disabled = false;
+    });
   })();
 </script>
 </body>
