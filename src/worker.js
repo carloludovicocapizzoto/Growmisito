@@ -3487,10 +3487,13 @@ async function handleAdminNewsletterResendSync(request, env) {
   const auth = await requireStaffAccount(request, env);
   if (auth.error) return auth.error;
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
-  if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY non configurato");
+  // Chiave a parte (RESEND_ADMIN_KEY, accesso completo) solo per i contatti: così la chiave che
+  // manda le mail dei biglietti resta "solo invio". Se non c'è, prova con quella normale.
+  const resendKey = env.RESEND_ADMIN_KEY || env.RESEND_API_KEY;
+  if (!resendKey) throw new Error("RESEND_API_KEY non configurato");
   const body = await request.json().catch(function(){ return {}; });
   const offset = Math.max(0, parseInt(body.offset, 10) || 0);
-  const headers = { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" };
+  const headers = { "Authorization": `Bearer ${resendKey}`, "Content-Type": "application/json" };
 
   let audienceId = await env.TICKETS.get("newsletter:resend-audience");
   if (!audienceId) {
@@ -3498,7 +3501,7 @@ async function handleAdminNewsletterResendSync(request, env) {
     const d = await r.json().catch(function(){ return {}; });
     if (!r.ok || !d.id) {
       const hint = r.status === 401 || r.status === 403
-        ? "La chiave Resend del sito ha solo il permesso di invio: crea in Resend una chiave con accesso completo e aggiornala nei segreti del Worker (RESEND_API_KEY)."
+        ? "La chiave Resend del sito ha solo il permesso di invio. In Resend crea una chiave con accesso completo (Full access) e aggiungila nei segreti del Worker con il nome RESEND_ADMIN_KEY."
         : "Resend ha risposto: " + (d.message || r.status);
       return jsonResponse({ error: hint }, 502);
     }
