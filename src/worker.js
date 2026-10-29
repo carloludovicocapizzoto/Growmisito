@@ -386,6 +386,22 @@ async function handleFetch(request, env, ctx) {
         return new Response("Errore, riprova più tardi.", { status: 500 });
       }
     }
+    if (url.pathname === "/api/admin/newsletter-resend-contacts" && request.method === "GET") {
+      try {
+        return await handleAdminNewsletterResendContacts(request, env);
+      } catch (err) {
+        console.log("Errore admin/newsletter-resend-contacts:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+    if (url.pathname === "/api/admin/newsletter-resend-html" && request.method === "GET") {
+      try {
+        return await handleAdminNewsletterResendHtml(request, env);
+      } catch (err) {
+        console.log("Errore admin/newsletter-resend-html:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
     if (url.pathname === "/api/admin/newsletter-subscribers" && request.method === "GET") {
       try {
         return await handleAdminListNewsletterSubscribers(request, env);
@@ -3430,6 +3446,60 @@ async function handleAdminListNewsletterSubscribers(request, env) {
   } while (cursor);
   subscribers.sort(function(a, b){ return (b.createdAt || "").localeCompare(a.createdAt || ""); });
   return jsonResponse({ subscribers });
+}
+
+// Esportazione per Resend Broadcasts (le newsletter grandi si mandano da lì, piano Marketing
+// gratuito fino a 1.000 contatti, senza il tetto di 100 mail/giorno dell'API transazionale che
+// serve anche ai biglietti). Contatti: solo chi ha dato il consenso e non si è disiscritto,
+// nel formato che Resend importa da CSV. ?targets=all,event:slug,group:id (come le campagne).
+async function handleAdminNewsletterResendContacts(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const targets = String(new URL(request.url).searchParams.get("targets") || "all").split(",").map(function(t){ return t.trim(); }).filter(Boolean);
+  const recipients = await resolveCampaignRecipients(env, targets);
+  const rows = ["email,first_name,last_name,unsubscribed"];
+  for (const sub of recipients) {
+    const parts = String(sub.name || "").trim().split(/\s+/).filter(Boolean);
+    const first = parts.shift() || "";
+    rows.push([sub.email, first, parts.join(" "), "false"].map(csvEscape).join(","));
+  }
+  return new Response(rows.join("\n") + "\n", {
+    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="growmi-contatti-resend.csv"' }
+  });
+}
+
+// HTML di una newsletter pronto da incollare/importare in Resend: stesso modello standard del
+// pannello, ma senza tracking (lo fa Resend) e con il link di disiscrizione di Resend al posto del
+// nostro. Senza ?id= restituisce il modello vuoto con segnaposto da sostituire.
+async function handleAdminNewsletterResendHtml(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const id = String(new URL(request.url).searchParams.get("id") || "").trim();
+  const base = newsletterBaseUrl(env);
+  const settings = await getNewsletterSettings(env);
+  let campaign = null;
+  if (id) {
+    const raw = await env.TICKETS.get(`newslettercampaign:${id}`);
+    if (!raw) return jsonResponse({ error: "campagna non trovata" }, 404);
+    campaign = JSON.parse(raw);
+  }
+  const html = newsletterStandardTemplateHtml({
+    base, settings,
+    heroImageUrl: campaign && campaign.heroImageKey ? `${base}${mediaUrl(campaign.heroImageKey)}` : null,
+    heroImagePosition: campaign && campaign.heroImagePosition,
+    title: campaign ? campaign.title : "Titolo della newsletter",
+    trackedBody: campaign
+      ? absolutizeMediaUrls(campaign.bodyHtml || "", base)
+      : `<p>Ciao {{{FIRST_NAME|}}},</p><p>Scrivi qui il testo della newsletter.</p>`,
+    unsubUrl: "{{{RESEND_UNSUBSCRIBE_URL}}}"
+  });
+  const fileName = campaign ? `newsletter-${String(campaign.name || id).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.html` : "modello-newsletter-growmi.html";
+  const page = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>${campaign ? String(campaign.subject || "").replace(/[<>&]/g, "") : "Newsletter GrowMi"}</title></head><body style="margin:0; padding:24px 12px; background:#EFE7DC;">${html}</body></html>`;
+  return new Response(page, {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `attachment; filename="${fileName}"` }
+  });
 }
 
 // Importa gli iscritti già presenti su MailerLite (paginazione a cursore dell'API v2) — non

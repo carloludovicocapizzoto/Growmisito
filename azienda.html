@@ -641,6 +641,15 @@
           <button type="button" class="az-mini-btn" id="az-nl-import-mailerlite-campaigns">⬇️ Importa storico da MailerLite</button>
         </div>
       </div>
+      <div style="border:1.5px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; background:#fff; max-width:640px;">
+        <p style="font-size:13px; font-weight:600; margin-bottom:6px;">📨 Per mandare con Resend (Broadcast)</p>
+        <p style="font-size:12px; color:var(--grey); margin-bottom:10px;">Scarica i contatti (solo chi ha il consenso e non si è disiscritto) da importare in Resend → Audience, e il modello GrowMi in HTML da usare nel Broadcast. Il link "Disiscriviti" nel modello è quello di Resend. Ogni newsletter già creata qui ha anche il suo pulsante "HTML per Resend".</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="az-nl-resend-target" style="padding:8px 10px; border-radius:8px; border:1.5px solid var(--line); font-size:13px;"><option value="all">Tutti con consenso</option></select>
+          <button type="button" class="az-mini-btn" id="az-nl-resend-contacts">👥 Contatti per Resend (CSV)</button>
+          <button type="button" class="az-mini-btn" id="az-nl-resend-template">🧩 Modello vuoto (HTML)</button>
+        </div>
+      </div>
       <p class="az-msg" id="az-nl-import-campaigns-msg" hidden></p>
       <div id="az-nl-campaigns-list"></div>
       <p class="az-empty" id="az-nl-campaigns-empty" hidden>Nessuna newsletter ancora.</p>
@@ -2287,6 +2296,25 @@
     btn.disabled = false;
   });
 
+  function populateNlResendTargets(){
+    var select = document.getElementById('az-nl-resend-target');
+    var eventSlugs = new Set();
+    allSubscribers.forEach(function(s){ (s.eventGroups || []).forEach(function(slug){ eventSlugs.add(slug); }); });
+    var options = ['<option value="all">Tutti con consenso</option>', '<option value="site-signup">Solo iscritti dal sito</option>'];
+    Array.from(eventSlugs).sort().forEach(function(slug){ options.push('<option value="event:' + esc(slug) + '">Evento: ' + esc(slug) + '</option>'); });
+    allNlGroups.forEach(function(g){ options.push('<option value="group:' + g.id + '">Gruppo: ' + esc(g.name) + '</option>'); });
+    var current = select.value;
+    select.innerHTML = options.join('');
+    if (Array.from(select.options).some(function(o){ return o.value === current; })) select.value = current;
+  }
+  document.getElementById('az-nl-resend-contacts').addEventListener('click', function(){
+    populateNlResendTargets();
+    downloadCsv('/api/admin/newsletter-resend-contacts?targets=' + encodeURIComponent(document.getElementById('az-nl-resend-target').value), 'growmi-contatti-resend.csv', this, '👥 Contatti per Resend (CSV)');
+  });
+  document.getElementById('az-nl-resend-template').addEventListener('click', function(){
+    downloadCsv('/api/admin/newsletter-resend-html', 'modello-newsletter-growmi.html', this, '🧩 Modello vuoto (HTML)');
+  });
+
   function populateNlGroupFilter(){
     var select = document.getElementById('az-nl-filter-group');
     var current = select.value;
@@ -2297,6 +2325,7 @@
     allNlGroups.forEach(function(g){ options.push('<option value="group:' + g.id + '">Gruppo: ' + esc(g.name) + '</option>'); });
     select.innerHTML = options.join('');
     if (Array.from(select.options).some(function(o){ return o.value === current; })) select.value = current;
+    populateNlResendTargets();
   }
 
   function renderNlSubscribers(){
@@ -2544,6 +2573,7 @@
           '<div><strong>' + esc(c.name) + '</strong><br><span style="font-size:12px; color:var(--grey);">' + esc(c.subject || 'Nessun oggetto') + '</span></div>' +
           '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' + statusBadge +
             (canEdit ? '<button type="button" class="az-mini-btn" data-open="' + c.id + '">Modifica</button><button type="button" class="az-mini-btn danger" data-del="' + c.id + '">Elimina</button>' : '') +
+            '<button type="button" class="az-mini-btn" data-resend-html="' + c.id + '">📋 HTML per Resend</button>' +
             (c.status === 'partial' ? '<button type="button" class="az-mini-btn" data-retry="' + c.id + '">🔁 Riprova ai rimasti</button>' : '') +
             ((c.status === 'sent' || c.status === 'partial') ? '<button type="button" class="az-mini-btn" data-manual="' + c.id + '">✉️ Invia a lista</button>' : '') +
             ((c.status === 'sent' || c.status === 'partial') ? '<button type="button" class="az-mini-btn" data-find-missing="' + c.id + '">🔍 Chi manca</button>' : '') +
@@ -2564,6 +2594,10 @@
           '<button type="button" class="az-mini-btn" data-calc-missing="' + c.id + '" style="margin-top:6px;">Calcola chi manca</button>' +
           '<div id="nl-missing-result-' + c.id + '" class="az-u-mt10"></div>' +
         '</div>';
+      var resendHtmlBtn = row.querySelector('[data-resend-html]');
+      if (resendHtmlBtn) resendHtmlBtn.addEventListener('click', function(){
+        downloadCsv('/api/admin/newsletter-resend-html?id=' + encodeURIComponent(c.id), 'newsletter-' + (c.name || c.id).replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.html', resendHtmlBtn, '📋 HTML per Resend');
+      });
       var openBtn = row.querySelector('[data-open]');
       if (openBtn) openBtn.addEventListener('click', function(){ openCampaignComposer(c); });
       var delBtn = row.querySelector('[data-del]');
