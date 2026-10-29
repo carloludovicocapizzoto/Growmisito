@@ -394,6 +394,14 @@ async function handleFetch(request, env, ctx) {
         return jsonResponse({ error: err.message }, 500);
       }
     }
+    if (url.pathname === "/api/admin/newsletter-resend-sync" && request.method === "POST") {
+      try {
+        return await handleAdminNewsletterResendSync(request, env);
+      } catch (err) {
+        console.log("Errore admin/newsletter-resend-sync:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
     if (url.pathname === "/api/admin/newsletter-resend-html" && request.method === "GET") {
       try {
         return await handleAdminNewsletterResendHtml(request, env);
@@ -3467,6 +3475,73 @@ async function handleAdminNewsletterResendContacts(request, env) {
   return new Response(rows.join("\n") + "\n", {
     headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="growmi-contatti-resend.csv"' }
   });
+}
+
+// Carica gli iscritti con consenso nell'Audience di Resend (creata la prima volta, id salvato in
+// KV). A blocchi di 20 per volta, chiamato in loop dal pannello con offset crescente: l'API di
+// Resend accetta ~2 richieste/secondo e un unico giro lungo rischierebbe di essere interrotto a
+// metà. Chi si è disiscritto qui viene caricato come "unsubscribed" così Resend non gli scrive
+// mai. Si può rilanciare senza problemi: un contatto già presente conta come ok.
+const RESEND_SYNC_BATCH = 20;
+async function handleAdminNewsletterResendSync(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY non configurato");
+  const body = await request.json().catch(function(){ return {}; });
+  const offset = Math.max(0, parseInt(body.offset, 10) || 0);
+  const headers = { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" };
+
+  let audienceId = await env.TICKETS.get("newsletter:resend-audience");
+  if (!audienceId) {
+    const r = await fetch("https://api.resend.com/audiences", { method: "POST", headers, body: JSON.stringify({ name: "GrowMi Newsletter" }) });
+    const d = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !d.id) {
+      const hint = r.status === 401 || r.status === 403
+        ? "La chiave Resend del sito ha solo il permesso di invio: crea in Resend una chiave con accesso completo e aggiornala nei segreti del Worker (RESEND_API_KEY)."
+        : "Resend ha risposto: " + (d.message || r.status);
+      return jsonResponse({ error: hint }, 502);
+    }
+    audienceId = d.id;
+    await env.TICKETS.put("newsletter:resend-audience", audienceId);
+  }
+
+  const all = [];
+  let cursor = undefined;
+  do {
+    const page = await env.TICKETS.list({ prefix: "subscriber:", cursor });
+    for (const key of page.keys) {
+      const raw = await env.TICKETS.get(key.name);
+      if (!raw) continue;
+      const sub = JSON.parse(raw);
+      if (sub.newsletterOptin) all.push(sub);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  all.sort(function(a, b){ return a.email.localeCompare(b.email); });
+
+  const slice = all.slice(offset, offset + RESEND_SYNC_BATCH);
+  let ok = 0, failed = 0;
+  const errors = [];
+  for (let i = 0; i < slice.length; i++) {
+    const sub = slice[i];
+    const parts = String(sub.name || "").trim().split(/\s+/).filter(Boolean);
+    const payload = JSON.stringify({ email: sub.email, first_name: parts.shift() || undefined, last_name: parts.join(" ") || undefined, unsubscribed: !!sub.unsubscribed });
+    let res = await fetch(`https://api.resend.com/audiences/${audienceId}/contacts`, { method: "POST", headers, body: payload });
+    if (res.status === 429) {
+      await new Promise(function(resolve){ setTimeout(resolve, 1200); });
+      res = await fetch(`https://api.resend.com/audiences/${audienceId}/contacts`, { method: "POST", headers, body: payload });
+    }
+    if (res.ok) ok++;
+    else {
+      const d = await res.json().catch(function(){ return {}; });
+      if (/already exist/i.test(d.message || "")) ok++;
+      else { failed++; if (errors.length < 3) errors.push(`${sub.email}: ${d.message || res.status}`); }
+    }
+    if (i < slice.length - 1) await new Promise(function(resolve){ setTimeout(resolve, 600); });
+  }
+  const next = offset + slice.length;
+  return jsonResponse({ ok, failed, errors, total: all.length, next, done: next >= all.length, audienceId });
 }
 
 // HTML di una newsletter pronto da incollare/importare in Resend: stesso modello standard del

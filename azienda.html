@@ -648,7 +648,9 @@
           <select id="az-nl-resend-target" style="padding:8px 10px; border-radius:8px; border:1.5px solid var(--line); font-size:13px;"><option value="all">Tutti con consenso</option></select>
           <button type="button" class="az-mini-btn" id="az-nl-resend-contacts">👥 Contatti per Resend (CSV)</button>
           <button type="button" class="az-mini-btn" id="az-nl-resend-template">🧩 Modello vuoto (HTML)</button>
+          <button type="button" class="primary" id="az-nl-resend-sync">☁️ Carica tutti gli iscritti su Resend</button>
         </div>
+        <p class="az-msg" id="az-nl-resend-sync-msg" hidden style="margin-top:10px;"></p>
       </div>
       <p class="az-msg" id="az-nl-import-campaigns-msg" hidden></p>
       <div id="az-nl-campaigns-list"></div>
@@ -2310,6 +2312,25 @@
   document.getElementById('az-nl-resend-contacts').addEventListener('click', function(){
     populateNlResendTargets();
     downloadCsv('/api/admin/newsletter-resend-contacts?targets=' + encodeURIComponent(document.getElementById('az-nl-resend-target').value), 'growmi-contatti-resend.csv', this, '👥 Contatti per Resend (CSV)');
+  });
+  document.getElementById('az-nl-resend-sync').addEventListener('click', async function(){
+    var btn = this, msg = document.getElementById('az-nl-resend-sync-msg');
+    if (!confirm('Carico su Resend nome ed email di tutti gli iscritti alla newsletter (chi si è disiscritto viene caricato come disiscritto). Procedo?')) return;
+    btn.disabled = true;
+    var offset = 0, okTot = 0, failTot = 0, errs = [];
+    try {
+      while (true) {
+        var res = await fetch('/api/admin/newsletter-resend-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offset: offset }) });
+        var d = await res.json();
+        if (!res.ok) { showMsg(msg, d.error || 'Errore.', true); btn.disabled = false; return; }
+        okTot += d.ok; failTot += d.failed; errs = errs.concat(d.errors || []);
+        offset = d.next;
+        showMsg(msg, 'Caricati ' + Math.min(offset, d.total) + ' di ' + d.total + '...', false);
+        if (d.done) break;
+      }
+      showMsg(msg, 'Fatto: ' + okTot + ' contatti su Resend' + (failTot ? ', ' + failTot + ' non riusciti (' + errs.join('; ') + ')' : '') + '. Li trovi in Resend → Audience → "GrowMi Newsletter".', failTot > 0);
+    } catch (err) { showMsg(msg, 'Errore di connessione: puoi rilanciare, i già caricati non vengono duplicati.', true); }
+    btn.disabled = false;
   });
   document.getElementById('az-nl-resend-template').addEventListener('click', function(){
     downloadCsv('/api/admin/newsletter-resend-html', 'modello-newsletter-growmi.html', this, '🧩 Modello vuoto (HTML)');
