@@ -1523,6 +1523,12 @@ function eventPageHTML(event, slug) {
   const galleryBlock = galleryItems
     ? `<section class="ed-section-tight"><div class="wrap"><div class="ed-gallery">${galleryItems}</div></div></section>`
     : "";
+  // Banda decorativa a tutta larghezza in fondo alla pagina (prima della newsletter), facoltativa.
+  // Su telefono si ritaglia ai lati (object-fit:cover) invece di rimpicciolirsi: al centro c'è
+  // sempre il nome dell'evento, ai bordi solo decorazione.
+  const footerBandBlock = event.footerImageKey
+    ? `<section class="ed-footer-band" style="margin:0; padding:0; line-height:0;"><img src="${mediaUrl(event.footerImageKey)}" alt="${event.name}" loading="lazy" style="display:block; width:100%; height:auto; min-height:150px; max-height:420px; object-fit:cover; object-position:center;"></section>`
+    : "";
   const advisoryBadge = (darkTheme && event.advisoryLabel)
     ? `<div class="ed-advisory"><b>${event.advisoryLabel}</b>${event.advisorySub ? `<span>${event.advisorySub}</span>` : ""}</div>`
     : "";
@@ -1718,6 +1724,8 @@ ${isPast ? "" : `
 `}
 
 ${galleryBlock}
+
+${footerBandBlock}
 
 <section class="ed-cta compact">
   <div class="wrap ed-cta-row">
@@ -5996,6 +6004,8 @@ function validateEventPayload(body, existingTiers, sold) {
   // Immagine della CARD nell'elenco eventi, distinta dalla locandina (coverImageKey, a metà pagina):
   // vuota = la card ricade sulla locandina come prima. Il ritaglio (coverPosition/Zoom) vale per lei.
   const cardImageKey = String(body.cardImageKey || "").trim() || null;
+  // Banda decorativa a tutta larghezza in fondo alla pagina evento (vedi footerBandBlock).
+  const footerImageKey = String(body.footerImageKey || "").trim() || null;
   const coverPosition = String(body.coverPosition || "center").trim().slice(0, 30);
   const coverZoom = clampImageZoom(body.coverZoom);
   const gallery = Array.isArray(body.gallery)
@@ -6104,7 +6114,7 @@ function validateEventPayload(body, existingTiers, sold) {
     }
   }
 
-  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
+  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
 }
 
 // image/gif incluso apposta per le newsletter: un GIF animato è l'unico modo che parte da solo e

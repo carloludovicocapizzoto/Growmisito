@@ -907,6 +907,14 @@
           </div>
 
           <div>
+            <label class="az-u-label13">Banda in fondo alla pagina</label>
+            <p class="az-u-hint10">Immagine decorativa a tutta larghezza, mostrata in fondo alla pagina dell'evento (prima della newsletter). Formato consigliato 1920×400: su telefono viene ritagliata ai lati, quindi tieni il testo al centro.</p>
+            <div class="az-image-preview" id="az-ev-footer-preview" style="aspect-ratio:1920/400;">Nessuna immagine</div>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" id="az-ev-footer-input">
+            <button type="button" class="az-mini-btn danger" id="az-ev-footer-remove" hidden>Rimuovi</button>
+          </div>
+
+          <div>
             <label class="az-u-label13">Loghi sponsor</label>
             <p class="az-u-hint10">Carica quanti loghi vuoi, poi scegli come mostrarli.</p>
             <div class="az-field" style="max-width:320px;">
@@ -3605,6 +3613,7 @@
   var evHeroFraming = { position: 'center', zoom: 1 };
   var evCoverKey = null;
   var evCardKey = null;
+  var evFooterKey = null;
   var evCoverFraming = { position: 'center', zoom: 1 };
   var evGallery = [];
   var evSponsorLogos = [];
@@ -3735,6 +3744,23 @@
     try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evCoverKey }) }); } catch (e) {}
     evCoverKey = null;
     renderCoverPreview();
+  });
+  function renderFooterPreview(){
+    document.getElementById('az-ev-footer-preview').innerHTML = imagePreviewHTML(evFooterKey);
+    document.getElementById('az-ev-footer-remove').hidden = !evFooterKey;
+  }
+  document.getElementById('az-ev-footer-input').addEventListener('change', async function(){
+    var file = this.files[0];
+    this.value = '';
+    if (!file) return;
+    try { evFooterKey = await uploadEventImage(file, 'footer'); renderFooterPreview(); }
+    catch (err) { alert(err.message); }
+  });
+  document.getElementById('az-ev-footer-remove').addEventListener('click', async function(){
+    if (!evFooterKey) return;
+    try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evFooterKey }) }); } catch (e) {}
+    evFooterKey = null;
+    renderFooterPreview();
   });
   document.getElementById('az-ev-card-input').addEventListener('change', async function(){
     var file = this.files[0];
@@ -6347,6 +6373,8 @@
     evHeroFraming = { position: (event && event.heroPosition) || 'center', zoom: (event && event.heroZoom) || 1 };
     evCoverKey = event ? (event.coverImageKey || null) : null;
     evCardKey = event ? (event.cardImageKey || null) : null;
+    evFooterKey = event ? (event.footerImageKey || null) : null;
+    renderFooterPreview();
     evCoverFraming = { position: (event && event.coverPosition) || 'center', zoom: (event && event.coverZoom) || 1 };
     evGallery = event ? (event.gallery || []).slice() : [];
     // Retrocompatibilità: sponsorLogos è passato da lista di stringhe, a {key, darkBacking:bool}
@@ -6452,6 +6480,7 @@
       heroZoom: evHeroFraming.zoom,
       coverImageKey: evCoverKey,
       cardImageKey: evCardKey,
+      footerImageKey: evFooterKey,
       coverPosition: evCoverFraming.position,
       coverZoom: evCoverFraming.zoom,
       gallery: evGallery,
