@@ -7635,8 +7635,34 @@ function isJazzSkinActive(now) {
   const today = (now || new Date()).toLocaleDateString("sv-SE", { timeZone: "Europe/Rome" });
   return today >= JAZZ_SKIN_FROM && today <= JAZZ_SKIN_UNTIL;
 }
+// Foto della slideshow in cima alla home durante la skin: sostituiscono le prime 3 (comprese quelle
+// scelte dal pannello) e scartano le eventuali extra; dal 13 novembre tutto torna come salvato.
+const JAZZ_HERO_SLIDES = [
+  { src: "/assets/img/home/jazz/slide-jazz-01.jpg", alt: "Tromba in primo piano durante un concerto jazz" },
+  { src: "/assets/img/home/jazz/slide-jazz-02.jpg", alt: "Sassofoni sul palco, luci calde di un locale jazz" },
+  { src: "/assets/img/home/jazz/slide-jazz-03.jpg", alt: "Riflessi di luce calda su uno strumento a fiato" }
+];
+class JazzSlideHandler {
+  constructor() { this.n = 0; }
+  element(el) { this.n++; if (this.n > JAZZ_HERO_SLIDES.length) el.remove(); }
+}
+class JazzSlideImgHandler {
+  constructor() { this.n = 0; }
+  element(el) {
+    const slide = JAZZ_HERO_SLIDES[this.n++];
+    if (!slide) return;
+    el.setAttribute("src", slide.src);
+    el.setAttribute("alt", slide.alt);
+    el.removeAttribute("srcset");
+    el.removeAttribute("style");
+  }
+}
 function applyJazzSkin(response) {
-  return new HTMLRewriter().on("head", new ThemeHeadHandler('<link rel="stylesheet" id="skin-jazz" href="/assets/theme-jazz.css?v=2">')).transform(response);
+  return new HTMLRewriter()
+    .on("head", new ThemeHeadHandler('<link rel="stylesheet" id="skin-jazz" href="/assets/theme-jazz.css?v=2">'))
+    .on(".ed-hero-slideshow .ed-hero-slide", new JazzSlideHandler())
+    .on(".ed-hero-slideshow .ed-hero-slide img", new JazzSlideImgHandler())
+    .transform(response);
 }
 
 async function finalizePublicHtmlResponse(request, env, response, ctx) {
