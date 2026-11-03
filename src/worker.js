@@ -7626,6 +7626,19 @@ async function handleAdminGetAnalytics(request, env) {
   return jsonResponse({ days: daysOut, topPages });
 }
 
+// Skin temporanea "Jazz Night": un foglio di stile in più (assets/theme-jazz.css) che ridefinisce la
+// palette e i pochi colori fissi del sito, iniettato SOLO nei giorni indicati (data di Milano, estremi
+// inclusi). Fuori dall'intervallo non viene aggiunto nulla e il sito torna com'era, senza deploy.
+const JAZZ_SKIN_FROM = "2026-11-03";
+const JAZZ_SKIN_UNTIL = "2026-11-12";
+function isJazzSkinActive(now) {
+  const today = (now || new Date()).toLocaleDateString("sv-SE", { timeZone: "Europe/Rome" });
+  return today >= JAZZ_SKIN_FROM && today <= JAZZ_SKIN_UNTIL;
+}
+function applyJazzSkin(response) {
+  return new HTMLRewriter().on("head", new ThemeHeadHandler('<link rel="stylesheet" id="skin-jazz" href="/assets/theme-jazz.css?v=1">')).transform(response);
+}
+
 async function finalizePublicHtmlResponse(request, env, response, ctx) {
   if (!env.TICKETS || !response) return response;
   const url = new URL(request.url);
@@ -7639,6 +7652,7 @@ async function finalizePublicHtmlResponse(request, env, response, ctx) {
     const [theme, legacyEventsOverride] = await Promise.all([getSiteTheme(env), getLegacyEventsOverride(env)]);
     let out = await applySiteTheme(response, theme);
     out = await applyLegacyEventsOverride(out, legacyEventsOverride);
+    if (isJazzSkinActive()) out = applyJazzSkin(out);
     return out;
   } catch (err) {
     console.log("Errore tema sito:", err.stack || err.message);

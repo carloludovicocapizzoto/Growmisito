@@ -1,0 +1,18 @@
+/* Skin temporanea "Jazz Night" (fino al 12 novembre 2026): palette calda ispirata al palco —
+   bordeaux, ambra, arancio, rosso. Si attiva da sola dal Worker (vedi JAZZ_SKIN_FROM/UNTIL in
+   src/worker.js) e dal 13 novembre non viene più caricata: il sito torna com'era. Nessun altro
+   file è stato toccato, quindi per spegnerla basta togliere la riga che la inietta. */
+:root{
+  --purple-deep:#5a0f1a; --purple-deeper:#2a0709; --lilac:#c2412e; --coral:#e8590f;
+  --yellow:#f6a30f; --magenta:#ee6a4c; --ink:#2a0d10; --grey:#7a6a68;
+  --line:rgba(42,13,16,.12); --loy-cream:#f1ddc3;
+}
+header.at-top nav.wrap{ background:rgba(90,15,26,.95); }
+.ed-hero::after{ background:rgba(26,6,8,calc(.55 * var(--hero-overlay-opacity,1))); }
+.ed-hero-video-overlay{ background:rgba(26,6,8,calc(.68 * var(--hero-overlay-opacity,1))); }
+.ed-hero-slideshow-overlay{ background:rgba(26,6,8,calc(.6 * var(--hero-overlay-opacity,1))); }
+.ed-cta:not(.compact) .ed-cta-row, .ed-cta-pair .ed-cta-row{ background:#7d1b22; }
+.ed-cta p, .cta-band p, .hero-dark p.lead, footer, .cookie-banner{ color:#ecd2c6; }
+.ed-hero .ed-lead{ color:#e6d3ca; }
+.foot-bottom{ color:#c9a99d; }
+svg polygon[stroke="#3E0D5D"]{ stroke:#5a0f1a; }
