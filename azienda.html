@@ -908,10 +908,18 @@
 
           <div>
             <label class="az-u-label13">Banda in fondo alla pagina</label>
-            <p class="az-u-hint10">Immagine decorativa a tutta larghezza, mostrata in fondo alla pagina dell'evento (prima della newsletter). Formato consigliato 1920×400: su telefono viene ritagliata ai lati, quindi tieni il testo al centro.</p>
+            <p class="az-u-hint10">Immagine decorativa a tutta larghezza, mostrata in fondo alla pagina dell'evento (prima della newsletter). Formato consigliato 1920×440. Senza l'immagine per telefono qui sotto, su telefono viene ritagliata ai lati (tieni il testo al centro).</p>
             <div class="az-image-preview" id="az-ev-footer-preview" style="aspect-ratio:1920/400;">Nessuna immagine</div>
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" id="az-ev-footer-input">
             <button type="button" class="az-mini-btn danger" id="az-ev-footer-remove" hidden>Rimuovi</button>
+          </div>
+
+          <div>
+            <label class="az-u-label13">Banda in fondo — versione per telefono (facoltativa)</label>
+            <p class="az-u-hint10">Usata sugli schermi stretti (fino a 820px) al posto di quella sopra, senza ritagli. Formato consigliato 1080×640.</p>
+            <div class="az-image-preview" id="az-ev-footer-mobile-preview" style="aspect-ratio:1080/640; max-width:360px;">Nessuna immagine</div>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" id="az-ev-footer-mobile-input">
+            <button type="button" class="az-mini-btn danger" id="az-ev-footer-mobile-remove" hidden>Rimuovi</button>
           </div>
 
           <div>
@@ -3614,6 +3622,7 @@
   var evCoverKey = null;
   var evCardKey = null;
   var evFooterKey = null;
+  var evFooterMobileKey = null;
   var evCoverFraming = { position: 'center', zoom: 1 };
   var evGallery = [];
   var evSponsorLogos = [];
@@ -3761,6 +3770,23 @@
     try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evFooterKey }) }); } catch (e) {}
     evFooterKey = null;
     renderFooterPreview();
+  });
+  function renderFooterMobilePreview(){
+    document.getElementById('az-ev-footer-mobile-preview').innerHTML = imagePreviewHTML(evFooterMobileKey);
+    document.getElementById('az-ev-footer-mobile-remove').hidden = !evFooterMobileKey;
+  }
+  document.getElementById('az-ev-footer-mobile-input').addEventListener('change', async function(){
+    var file = this.files[0];
+    this.value = '';
+    if (!file) return;
+    try { evFooterMobileKey = await uploadEventImage(file, 'footer-mobile'); renderFooterMobilePreview(); }
+    catch (err) { alert(err.message); }
+  });
+  document.getElementById('az-ev-footer-mobile-remove').addEventListener('click', async function(){
+    if (!evFooterMobileKey) return;
+    try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evFooterMobileKey }) }); } catch (e) {}
+    evFooterMobileKey = null;
+    renderFooterMobilePreview();
   });
   document.getElementById('az-ev-card-input').addEventListener('change', async function(){
     var file = this.files[0];
@@ -6375,6 +6401,8 @@
     evCardKey = event ? (event.cardImageKey || null) : null;
     evFooterKey = event ? (event.footerImageKey || null) : null;
     renderFooterPreview();
+    evFooterMobileKey = event ? (event.footerImageMobileKey || null) : null;
+    renderFooterMobilePreview();
     evCoverFraming = { position: (event && event.coverPosition) || 'center', zoom: (event && event.coverZoom) || 1 };
     evGallery = event ? (event.gallery || []).slice() : [];
     // Retrocompatibilità: sponsorLogos è passato da lista di stringhe, a {key, darkBacking:bool}
@@ -6481,6 +6509,7 @@
       coverImageKey: evCoverKey,
       cardImageKey: evCardKey,
       footerImageKey: evFooterKey,
+      footerImageMobileKey: evFooterMobileKey,
       coverPosition: evCoverFraming.position,
       coverZoom: evCoverFraming.zoom,
       gallery: evGallery,
