@@ -16,3 +16,5 @@ header.at-top nav.wrap{ background:rgba(90,15,26,.95); }
 .ed-hero .ed-lead{ color:#e6d3ca; }
 .foot-bottom{ color:#c9a99d; }
 svg polygon[stroke="#3E0D5D"]{ stroke:#5a0f1a; }
+/* Sfondo hero di default (viola alone) -> bordeaux: filtro sul pseudo-elemento che lo disegna */
+.ed-hero::before{ filter:sepia(1) saturate(3.2) hue-rotate(-42deg) brightness(.8) contrast(1.05); }

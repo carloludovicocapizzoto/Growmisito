@@ -7636,7 +7636,7 @@ function isJazzSkinActive(now) {
   return today >= JAZZ_SKIN_FROM && today <= JAZZ_SKIN_UNTIL;
 }
 function applyJazzSkin(response) {
-  return new HTMLRewriter().on("head", new ThemeHeadHandler('<link rel="stylesheet" id="skin-jazz" href="/assets/theme-jazz.css?v=1">')).transform(response);
+  return new HTMLRewriter().on("head", new ThemeHeadHandler('<link rel="stylesheet" id="skin-jazz" href="/assets/theme-jazz.css?v=2">')).transform(response);
 }
 
 async function finalizePublicHtmlResponse(request, env, response, ctx) {
