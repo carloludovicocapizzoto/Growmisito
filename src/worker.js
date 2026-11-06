@@ -1706,6 +1706,9 @@ ${isPast ? "" : `
             <input type="tel" data-et-phone placeholder="333 1234567" required>
           </div>
           <input type="email" data-et-email placeholder="Email" required>
+          <div class="et-guests" data-et-guests></div>
+          <button type="button" class="et-add-guest" data-et-add-guest>+ Aggiungi un altro biglietto</button>
+          <p class="et-total" data-et-total></p>
           <label><input type="checkbox" data-et-terms required> Accetto termini e condizioni</label>
           <label><input type="checkbox" data-et-photo-consent required> Accetto il trattamento immagini</label>
           <label><input type="checkbox" data-et-newsletter> Iscrivimi alla newsletter</label>
@@ -4593,6 +4596,9 @@ async function handleAdminWaitlistCsv(request, env) {
   });
 }
 
+// Massimo di biglietti acquistabili in un solo pagamento (compreso quello di chi compra).
+const MAX_TICKETS_PER_PURCHASE = 5;
+
 async function handleRegister(request, env) {
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
 
@@ -4611,6 +4617,27 @@ async function handleRegister(request, env) {
     return jsonResponse({ error: "nome, telefono, email, termini e condizioni e consenso foto/video sono obbligatori" }, 400);
   }
 
+  // Biglietti in più nello stesso acquisto (pulsante "+" nel form): ognuno ha il suo intestatario
+  // con nome, cognome ed email, e il biglietto arriva all'email indicata. Tetto di
+  // MAX_TICKETS_PER_PURCHASE in totale (compreso quello di chi compra).
+  const rawGuests = Array.isArray(body.guests) ? body.guests : [];
+  if (rawGuests.length > MAX_TICKETS_PER_PURCHASE - 1) {
+    return jsonResponse({ error: `puoi acquistare al massimo ${MAX_TICKETS_PER_PURCHASE} biglietti alla volta` }, 400);
+  }
+  const guests = [];
+  for (let i = 0; i < rawGuests.length; i++) {
+    const g = rawGuests[i] || {};
+    const gName = (String(g.firstName || "").trim() + " " + String(g.lastName || "").trim()).trim().slice(0, 200);
+    const gEmail = String(g.email || "").trim().slice(0, 200);
+    if (!String(g.firstName || "").trim() || !String(g.lastName || "").trim() || !gEmail) {
+      return jsonResponse({ error: `biglietto ${i + 2}: nome, cognome ed email sono obbligatori` }, 400);
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(gEmail)) {
+      return jsonResponse({ error: `biglietto ${i + 2}: l'email non è valida` }, 400);
+    }
+    guests.push({ name: gName, email: gEmail });
+  }
+
   // Il coupon è facoltativo: se il campo è vuoto si procede normalmente. Se è compilato, deve
   // essere valido — meglio bloccare qui con un errore chiaro che scoprirlo al checkout.
   if (couponCode) {
@@ -4622,6 +4649,7 @@ async function handleRegister(request, env) {
   await env.TICKETS.put(`registration:${registrationId}`, JSON.stringify({
     eventSlug, name, phone, email, termsAccepted, photoConsent, newsletterOptin,
     couponCode: couponCode || null,
+    guests,
     createdAt: new Date().toISOString()
   }));
 
@@ -4669,8 +4697,14 @@ async function handleCreateCheckoutSession(request, env) {
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
+  // Biglietti in questo acquisto: quello di chi compra più gli ospiti aggiunti con il "+".
+  const guests = Array.isArray(registration.guests) ? registration.guests : [];
+  const ticketCount = 1 + guests.length;
   if (sold >= found.tier.capacity) {
     return jsonResponse({ error: "fascia esaurita" }, 409);
+  }
+  if (sold + ticketCount > found.tier.capacity) {
+    return jsonResponse({ error: "posti insufficienti", remaining: found.tier.capacity - sold }, 409);
   }
 
   // Ricontrollo il coupon qui, non solo al momento della registrazione: è il punto più vicino
@@ -4689,28 +4723,42 @@ async function handleCreateCheckoutSession(request, env) {
   // cosi' l'importo pagato è sempre coerente con quello mostrato sul sito (stessa addStripeFee()
   // usata da handleEventTiers) e un coupon (priceCents 0) non genera mai nessuna commissione.
   const { grossCents } = addStripeFee(priceCents);
+  // Gli ospiti pagano il prezzo pieno (con la stessa commissione di sempre, calcolata per
+  // biglietto): il coupon vale solo per il biglietto di chi compra, mai per gli altri.
+  const guestGrossCents = addStripeFee(found.option.priceCents).grossCents;
 
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const origin = new URL(request.url).origin;
+  const productName = `${found.event.name} — ${found.tier.name} — ${found.option.label}`;
+  const lineItems = [{
+    quantity: 1,
+    price_data: {
+      currency: "eur",
+      unit_amount: grossCents,
+      product_data: { name: productName + (couponApplied ? " (coupon 5° evento)" : "") }
+    }
+  }];
+  if (guests.length) {
+    lineItems.push({
+      quantity: guests.length,
+      price_data: { currency: "eur", unit_amount: guestGrossCents, product_data: { name: productName } }
+    });
+  }
 
   const session = await stripe.checkout.sessions.create({
     ui_mode: "embedded",
     mode: "payment",
     client_reference_id: registrationId,
     customer_email: registration.email,
-    line_items: [{
-      quantity: 1,
-      price_data: {
-        currency: "eur",
-        unit_amount: grossCents,
-        product_data: { name: `${found.event.name} — ${found.tier.name} — ${found.option.label}` + (couponApplied ? " (coupon 5° evento)" : "") }
-      }
-    }],
+    line_items: lineItems,
     metadata: {
       event: registration.eventSlug,
       tierId,
       optionId,
-      couponCode: couponApplied || ""
+      couponCode: couponApplied || "",
+      ticketCount: String(ticketCount),
+      buyerGrossCents: String(grossCents),
+      guestGrossCents: String(guestGrossCents)
     },
     return_url: `${origin}/biglietto-confermato?session_id={CHECKOUT_SESSION_ID}`
   });
@@ -4894,41 +4942,59 @@ async function handleStripeWebhook(request, env) {
       // ieri?" e mandare il feedback da solo.
       const eventDateIso = eventInfo?.dateIso || null;
       const tierName = found ? `${found.tier.name} — ${found.option.label}` : null;
-      const ticketCode = generateTicketCode();
+      // Un biglietto per ogni intestatario: chi ha pagato più gli eventuali ospiti aggiunti con il
+      // "+" nel form. Ognuno ha il suo codice/QR e riceve il biglietto alla propria email. Gli
+      // importi per biglietto vengono dal metadata della sessione (stessa commissione per ognuno),
+      // così gli incassi in statistica restano esatti invece di ripetere il totale su ogni biglietto.
+      const guests = Array.isArray(registration.guests) ? registration.guests : [];
+      const couponCode = session.metadata?.couponCode;
+      const buyerGross = Number.isFinite(Number(session.metadata?.buyerGrossCents)) && session.metadata?.buyerGrossCents !== undefined
+        ? Number(session.metadata.buyerGrossCents) : session.amount_total;
+      const guestGross = Number.isFinite(Number(session.metadata?.guestGrossCents)) && session.metadata?.guestGrossCents !== undefined
+        ? Number(session.metadata.guestGrossCents) : 0;
+      const holders = [{ name: customerName, email, phone: customerPhone, amount: buyerGross, isBuyer: true }]
+        .concat(guests.map(function(g){ return { name: g.name, email: g.email, phone: null, amount: guestGross, isBuyer: false }; }));
 
-      // SVG invece di PNG: su Cloudflare Workers la libreria carica la sua versione "da
-      // browser" (punta a un <canvas> che qui non esiste, e in quella versione manca anche
-      // toBuffer). toString con type "svg" è testo puro, funziona in qualsiasi ambiente.
-      const qrSvg = await QRCode.toString(ticketCode, { type: "svg", margin: 1, width: 400 });
-      const qrBase64 = btoa(qrSvg);
+      const issued = [];
+      for (const holder of holders) {
+        const ticketCode = generateTicketCode();
+        // SVG invece di PNG: su Cloudflare Workers la libreria carica la sua versione "da
+        // browser" (punta a un <canvas> che qui non esiste, e in quella versione manca anche
+        // toBuffer). toString con type "svg" è testo puro, funziona in qualsiasi ambiente.
+        const qrSvg = await QRCode.toString(ticketCode, { type: "svg", margin: 1, width: 400 });
+        const qrBase64 = btoa(qrSvg);
 
-      await env.TICKETS.put(`ticket:${ticketCode}`, JSON.stringify({
-        email,
-        name: customerName,
-        phone: customerPhone,
-        eventName,
-        eventDate,
-        eventDateIso,
-        eventLocation,
-        tierName,
-        eventSlug,
-        tierId,
-        optionId,
-        termsAccepted: registration.termsAccepted,
-        photoConsent: registration.photoConsent,
-        newsletterOptin: registration.newsletterOptin,
-        amountTotal: session.amount_total,
-        currency: session.currency,
-        used: false,
-        createdAt: new Date().toISOString(),
-        stripeSessionId: session.id,
-        source: "stripe"
-      }), { metadata: { used: false, eventSlug, tierId, email, eventName, eventDateIso, tierName, source: "stripe" } });
+        await env.TICKETS.put(`ticket:${ticketCode}`, JSON.stringify({
+          email: holder.email,
+          name: holder.name,
+          phone: holder.phone,
+          eventName,
+          eventDate,
+          eventDateIso,
+          eventLocation,
+          tierName,
+          eventSlug,
+          tierId,
+          optionId,
+          termsAccepted: registration.termsAccepted,
+          photoConsent: registration.photoConsent,
+          // Il consenso newsletter è di chi ha compilato il form: gli ospiti non l'hanno dato.
+          newsletterOptin: holder.isBuyer ? registration.newsletterOptin : false,
+          amountTotal: holder.amount,
+          currency: session.currency,
+          used: false,
+          createdAt: new Date().toISOString(),
+          stripeSessionId: session.id,
+          purchasedBy: holder.isBuyer ? null : email,
+          source: "stripe"
+        }), { metadata: { used: false, eventSlug, tierId, email: holder.email, eventName, eventDateIso, tierName, source: "stripe" } });
+        issued.push({ holder, ticketCode, qrBase64 });
+      }
+      const ticketCode = issued[0].ticketCode;
 
       // Se questo acquisto ha usato un coupon (5° evento gratis), lo segno come speso solo ORA
       // che il biglietto esiste davvero — mai prima, altrimenti un pagamento fallito/abbandonato
       // brucerebbe comunque il coupon senza che la persona abbia ottenuto nulla in cambio.
-      const couponCode = session.metadata?.couponCode;
       if (couponCode) {
         const couponRaw = await env.TICKETS.get(`coupon:${couponCode}`);
         if (couponRaw) {
@@ -4943,9 +5009,9 @@ async function handleStripeWebhook(request, env) {
       // La registrazione è servita al suo scopo (i dati sono ora sul biglietto): la rimuovo per
       // non lasciare copie sparse di dati personali su KV più a lungo del necessario.
       await env.TICKETS.delete(`registration:${registrationId}`);
-      // Segna l'evento Stripe come gestito solo ORA che il biglietto esiste davvero su KV:
+      // Segna l'evento Stripe come gestito solo ORA che i biglietti esistono davvero su KV:
       // cosi' se il Worker si interrompe prima di questo punto, un eventuale nuovo tentativo di
-      // Stripe riesce comunque a creare il biglietto, invece di essere scartato come "già fatto"
+      // Stripe riesce comunque a creare i biglietti, invece di essere scartato come "già fatto"
       // quando in realtà non è mai stato completato.
       await env.TICKETS.put(dedupeKey, ticketCode);
 
@@ -4953,37 +5019,45 @@ async function handleStripeWebhook(request, env) {
       // (vedi handleCheckin) — chi compra e non si presenta non riceve il timbro.
 
       if (env.RESEND_API_KEY) {
-        let pdfBase64 = null;
-        try {
-          const pdfBytes = await buildTicketPDF({ name: customerName, eventName, eventDate, eventLocation, tierName, ticketCode });
-          pdfBase64 = Buffer.from(pdfBytes).toString("base64");
-        } catch (e) {
-          console.log("Errore generazione PDF biglietto:", e.message);
-        }
+        for (const item of issued) {
+          let pdfBase64 = null;
+          try {
+            const pdfBytes = await buildTicketPDF({ name: item.holder.name, eventName, eventDate, eventLocation, tierName, ticketCode: item.ticketCode });
+            pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+          } catch (e) {
+            console.log("Errore generazione PDF biglietto:", e.message);
+          }
 
-        const attachments = [];
-        if (pdfBase64) attachments.push({ filename: "biglietto-growmi.pdf", content: pdfBase64 });
+          const attachments = [];
+          if (pdfBase64) attachments.push({ filename: "biglietto-growmi.pdf", content: pdfBase64 });
 
-        const resendRes = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            from: "GrowMi <noreply@growmi.it>",
-            to: email,
-            subject: `Il tuo biglietto — ${eventName}`,
-            html: buildTicketEmailHTML({ name: customerName, eventName, eventDate, eventLocation, eventTeaser, tierName, optionId, ticketCode, qrBase64 }),
-            attachments
-          })
-        });
-        if (!resendRes.ok) {
-          console.log("Resend error:", resendRes.status, await resendRes.text());
+          // Un errore su un biglietto non deve impedire l'invio degli altri: i biglietti sono
+          // comunque già validi su KV e riemettibili dallo staff.
+          try {
+            const resendRes = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                from: "GrowMi <noreply@growmi.it>",
+                to: item.holder.email,
+                subject: `Il tuo biglietto — ${eventName}`,
+                html: buildTicketEmailHTML({ name: item.holder.name, eventName, eventDate, eventLocation, eventTeaser, tierName, optionId, ticketCode: item.ticketCode, qrBase64: item.qrBase64 }),
+                attachments
+              })
+            });
+            if (!resendRes.ok) {
+              console.log("Resend error:", resendRes.status, await resendRes.text());
+            }
+          } catch (e) {
+            console.log("Errore invio biglietto a", item.holder.email, e.message);
+          }
         }
 
         // Avviso interno allo staff a ogni vendita — separato dalla mail al cliente (mai
-        // bloccante: se questa fallisce il biglietto è comunque già valido ed emesso sopra).
+        // bloccante: se questa fallisce i biglietti sono comunque già validi ed emessi sopra).
         const amount = typeof session.amount_total === "number" ? (session.amount_total / 100).toLocaleString("it-IT", { style: "currency", currency: (session.currency || "eur").toUpperCase() }) : "";
         try {
           const staffRes = await fetch("https://api.resend.com/emails", {
@@ -4992,13 +5066,14 @@ async function handleStripeWebhook(request, env) {
             body: JSON.stringify({
               from: "GrowMi <noreply@growmi.it>",
               to: "grow.mi@outlook.it",
-              subject: `Nuovo biglietto venduto — ${eventName}`,
+              subject: `Nuovo biglietto venduto — ${eventName}` + (issued.length > 1 ? ` (${issued.length} biglietti)` : ""),
               html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
                 `<p><strong>Nuova vendita per ${eventName}</strong></p>` +
                 `<p>${customerName} — ${email} — ${customerPhone}<br>` +
                 `Fascia: ${tierName || "—"}<br>` +
-                `Importo incassato: ${amount || "—"}<br>` +
-                `Codice biglietto: ${ticketCode}</p>` +
+                `Biglietti: ${issued.length}<br>` +
+                `Importo incassato: ${amount || "—"}</p>` +
+                `<p>` + issued.map(function(it){ return `${it.holder.name} — ${it.holder.email} — codice ${it.ticketCode}`; }).join("<br>") + `</p>` +
                 `</div>`
             })
           });

@@ -17,6 +17,8 @@
 //       <input data-et-firstname> <input data-et-lastname>
 //       <select data-et-phone-prefix> <input data-et-phone>
 //       <input type="email" data-et-email>
+//       <div data-et-guests></div> <button type="button" data-et-add-guest>...</button> <p data-et-total></p>
+//         (facoltativi: il "+" aggiunge biglietti per altre persone, ognuna con nome/cognome/email)
 //       <input type="checkbox" data-et-photo-consent> <input type="checkbox" data-et-newsletter>
 //       <input data-et-coupon> (facoltativo: codice del coupon "5° evento gratis" — se compilato
 //         e valido, il prezzo del biglietto diventa €0, controllato sempre lato server)
@@ -63,6 +65,60 @@
     var selectedTierId = null;
     var selectedOptionId = null;
     var selectedPriceInfo = null;
+    var guestsWrap = root.querySelector("[data-et-guests]");
+    var addGuestBtn = root.querySelector("[data-et-add-guest]");
+    var totalEl = root.querySelector("[data-et-total]");
+    // Biglietti in un solo acquisto (compreso il proprio): stesso tetto del server.
+    var MAX_TICKETS = 5;
+
+    function guestCount(){ return guestsWrap ? guestsWrap.querySelectorAll("[data-et-guest]").length : 0; }
+    function ticketCount(){ return 1 + guestCount(); }
+
+    // Riepilogo del totale che si aggiorna a ogni "+" / rimozione: stessa formula del server
+    // (commissione calcolata per biglietto), quindi quello che vedi è quello che paghi.
+    function updateTotals(){
+      var n = ticketCount();
+      if (addGuestBtn) addGuestBtn.hidden = n >= MAX_TICKETS;
+      if (!totalEl) return;
+      if (!selectedPriceInfo || n < 2) { totalEl.textContent = ""; return; }
+      totalEl.textContent = n + " biglietti × " + euro(selectedPriceInfo.gross) + " = " + euro(selectedPriceInfo.gross * n) + " (commissione di transazione inclusa)";
+    }
+
+    function renumberGuests(){
+      if (!guestsWrap) return;
+      guestsWrap.querySelectorAll("[data-et-guest]").forEach(function(g, i){
+        g.querySelector("[data-et-guest-title]").textContent = "Biglietto " + (i + 2);
+      });
+    }
+
+    function addGuest(){
+      if (!guestsWrap || ticketCount() >= MAX_TICKETS) return;
+      var g = document.createElement("div");
+      g.className = "et-guest";
+      g.setAttribute("data-et-guest", "");
+      g.innerHTML =
+        '<div class="et-guest-head"><span data-et-guest-title></span><button type="button" class="et-guest-remove" aria-label="Rimuovi questo biglietto">×</button></div>' +
+        '<div class="et-form-row"><input type="text" data-g-firstname placeholder="Nome" required><input type="text" data-g-lastname placeholder="Cognome" required></div>' +
+        '<input type="email" data-g-email placeholder="Email" required>';
+      g.querySelector(".et-guest-remove").addEventListener("click", function(){
+        g.remove(); renumberGuests(); updateTotals();
+      });
+      guestsWrap.appendChild(g);
+      renumberGuests(); updateTotals();
+      g.querySelector("[data-g-firstname]").focus();
+    }
+    if (addGuestBtn) addGuestBtn.addEventListener("click", addGuest);
+
+    function collectGuests(){
+      if (!guestsWrap) return [];
+      return Array.prototype.map.call(guestsWrap.querySelectorAll("[data-et-guest]"), function(g){
+        return {
+          firstName: g.querySelector("[data-g-firstname]").value.trim(),
+          lastName: g.querySelector("[data-g-lastname]").value.trim(),
+          email: g.querySelector("[data-g-email]").value.trim()
+        };
+      });
+    }
 
     function renderTiers(data){
       tierList.innerHTML = "";
@@ -162,6 +218,7 @@
       selectedOptionId = optionId;
       selectedPriceInfo = priceInfo || null;
       if (selectionLabel) selectionLabel.textContent = label;
+      updateTotals();
       regStep.hidden = false;
       checkoutWrap.hidden = true;
       checkoutContainer.innerHTML = "";
@@ -172,8 +229,9 @@
       checkoutWrap.hidden = false;
       checkoutContainer.innerHTML = "";
       if (checkoutBreakdown && selectedPriceInfo) {
+        var n = ticketCount();
         checkoutBreakdown.textContent = selectedPriceInfo.fee > 0
-          ? "Biglietto " + euro(selectedPriceInfo.price) + " + commissione transazione " + euro(selectedPriceInfo.fee) + " = " + euro(selectedPriceInfo.gross)
+          ? (n > 1 ? n + " × (" : "") + "Biglietto " + euro(selectedPriceInfo.price) + " + commissione transazione " + euro(selectedPriceInfo.fee) + (n > 1 ? ")" : "") + " = " + euro(selectedPriceInfo.gross * n)
           : "";
       }
       checkoutWrap.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -187,7 +245,9 @@
         if (!res.ok) {
           checkoutContainer.textContent = data.error === "fascia esaurita"
             ? "Questa fascia si è appena esaurita — aggiorna la pagina e scegli quella successiva."
-            : "Qualcosa è andato storto, riprova.";
+            : data.error === "posti insufficienti"
+              ? "In questa fascia restano solo " + data.remaining + " posti: aggiorna la pagina e riduci i biglietti."
+              : "Qualcosa è andato storto, riprova.";
           return;
         }
         var stripe = window.Stripe(STRIPE_PUBLISHABLE_KEY);
@@ -220,7 +280,8 @@
             termsAccepted: form.querySelector("[data-et-terms]") ? form.querySelector("[data-et-terms]").checked : false,
             photoConsent: form.querySelector("[data-et-photo-consent]").checked,
             newsletterOptin: form.querySelector("[data-et-newsletter]") ? form.querySelector("[data-et-newsletter]").checked : false,
-            couponCode: couponInput ? couponInput.value.trim() : ""
+            couponCode: couponInput ? couponInput.value.trim() : "",
+            guests: collectGuests()
           })
         });
         var data = await res.json();

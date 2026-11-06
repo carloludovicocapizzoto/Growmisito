@@ -181,3 +181,28 @@
 .et-checkout-wrap{ max-width:640px; margin-top:28px; }
 .et-checkout-wrap[hidden]{ display:none; }
 [data-et-checkout-container]{ min-height:200px; }
+
+/* Form acquisto generato dal Worker (eventPageHTML): campi, consensi e biglietti aggiuntivi */
+.et-reg-form .et-form-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.et-reg-form .et-form-row:has(select){ grid-template-columns:120px 1fr; }
+@media (max-width:560px){ .et-reg-form .et-form-row{ grid-template-columns:1fr; } .et-reg-form .et-form-row:has(select){ grid-template-columns:110px 1fr; } }
+.et-reg-form input[type=text], .et-reg-form input[type=email], .et-reg-form input[type=tel], .et-reg-form select{
+  width:100%; padding:13px 15px; border-radius:10px; border:1.5px solid rgba(255,255,255,.18);
+  background:rgba(255,255,255,.05); color:#fff; font-family:var(--font-body); font-size:14.5px; box-sizing:border-box;
+}
+.et-reg-form select option{ color:#1E0C2C; }
+.et-reg-form input::placeholder{ color:rgba(255,255,255,.45); }
+.et-reg-form input:focus, .et-reg-form select:focus{ outline:none; border-color:var(--coral); }
+.et-reg-form label{ display:flex; align-items:flex-start; gap:10px; font-size:13px; color:#C9C4D1; line-height:1.5; }
+.et-reg-form label input[type=checkbox]{ margin-top:3px; flex-shrink:0; width:16px; height:16px; accent-color:var(--coral); }
+.et-guests{ display:flex; flex-direction:column; gap:14px; }
+.et-guests:empty{ display:none; }
+.et-guest{ display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:14px; border:1.5px solid rgba(255,255,255,.14); background:rgba(255,255,255,.03); }
+.et-guest-head{ display:flex; justify-content:space-between; align-items:center; font-family:var(--font-heading); font-weight:700; font-size:14px; color:#fff; }
+.et-guest-remove{ background:none; border:0; color:#C9C4D1; font-size:24px; line-height:1; padding:0 6px; cursor:pointer; }
+.et-guest-remove:hover{ color:var(--coral); }
+.et-add-guest{ align-self:flex-start; background:transparent; border:1.5px dashed rgba(255,255,255,.4); color:#fff; border-radius:999px; padding:11px 20px; font-family:var(--font-body); font-weight:600; font-size:14px; cursor:pointer; transition:border-color .15s, color .15s; }
+.et-add-guest:hover{ border-color:var(--coral); color:var(--coral); }
+.et-add-guest[hidden]{ display:none; }
+.et-total{ font-family:var(--font-body); font-size:14px; color:#fff; margin:0; }
+.et-total:empty{ display:none; }
