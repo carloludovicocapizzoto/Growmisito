@@ -242,7 +242,6 @@
           '<span class="tag">' + escapeHTML(ev.tag) + '</span>' +
           '<h3>' + title + '</h3>' +
           '<p class="meta">' + escapeHTML(ev.location) + '</p>' +
-          (ev.priceNote ? '<p class="meta ed-card-price" style="color:#b8400f; font-weight:700;">' + escapeHTML(ev.priceNote) + '</p>' : '') +
           badge +
         '</a>'
       );
@@ -255,7 +254,7 @@
     function fromPublicEvent(ev){
       return {
         title: ev.name, date: ev.dateIso, tag: ev.dateDisplay, location: ev.location,
-        url: ev.pageUrl, cover: ev.coverImageUrl || ev.heroImageUrl || null, comingSoon: false, priceNote: ev.priceNote
+        url: ev.pageUrl, cover: ev.coverImageUrl || ev.heroImageUrl || null, comingSoon: false
       };
     }
     function renderUpcoming(dynamicEvents){
