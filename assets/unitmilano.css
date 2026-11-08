@@ -85,6 +85,8 @@
 .um-info-card-hl .um-info-label{ color:#6b4a00; }
 .um-info-card-hl .um-info-value{ color:#14105a; font-size:clamp(34px, 4vw, 52px); }
 .um-info-card-hl .um-info-sub{ color:#2a2166; font-weight:600; }
+.um-info-sub2{ margin-top:2px; }
+.um-info-card-hl .um-info-sub2{ color:#14105a; font-weight:700; }
 
 .um-cta-row{ display:flex; align-items:center; flex-wrap:wrap; gap:14px 22px; }
 .um-btn{

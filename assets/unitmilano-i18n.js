@@ -6,16 +6,16 @@
   var it = {
     um_badge: "Nuovo format · ogni mercoledì",
     um_subtitle: "Il mercoledì universitario di Milano.",
-    um_lead: "Un nuovo format di apericena con musica house e commerciale e tanto networking tra studenti. Cibo, drink e la città che si incontra, in una sola serata.",
+    um_lead: "Un nuovo format di apericena con musica house e commerciale e una community di studenti da conoscere. Cibo, drink e la città che si incontra, in una sola serata.",
     um_when_label: "Quando", um_when_value: "Mercoledì 18 novembre", um_when_sub: "Dalle 19:30 alle 3:00",
     um_where_label: "Dove", um_where_sub: "Via Torino 64, Milano",
-    um_formula_label: "Formula", um_formula_sub: "Apericena + 1 drink inclusi",
+    um_formula_label: "Formula", um_formula_sub: "Apericena + 1 drink inclusi", um_formula_sub2: "Dopo le 21:30: sempre 15&nbsp;€, con 2 drink inclusi",
     um_cta: "Registrati gratis", um_cta_note: "Paghi all'ingresso, dopo la scansione del QR code",
 
     um_format_eyebrow: "Il format", um_format_title: "Una serata, tre ingredienti",
     um_f1_t: "Musica", um_f1_p: "House e commerciale: il sound giusto per iniziare la serata e ballare fino a tardi.",
-    um_f2_t: "Networking", um_f2_p: "Conosci studenti di tutte le università di Milano: nuovi amici, nuovi progetti.",
-    um_f3_t: "Apericena", um_f3_p: "Cibo e un drink inclusi nei 15&nbsp;€: arrivi, mangi, brindi.",
+    um_f2_t: "Community", um_f2_p: "Conosci studenti di tutte le università di Milano: nuovi amici, nuovi progetti.",
+    um_f3_t: "Apericena", um_f3_p: "Cibo e un drink inclusi nei 15&nbsp;€: arrivi, mangi, brindi. Dopo le 21:30 sempre 15&nbsp;€, con due drink.",
 
     um_how_eyebrow: "Come funziona", um_how_title: "Tre passaggi, zero pagamenti online",
     um_s1_t: "Ti registri", um_s1_p: "Compili il form qui sotto: ci metti un minuto e non costa nulla.",
@@ -35,7 +35,7 @@
     um_done_eyebrow: "Registrazione confermata", um_done_title: "Sei dentro!",
     um_done_lead_mail: "Ciao {name}, ti abbiamo inviato il QR code via email (controlla anche lo spam). Eccolo anche qui: mostralo all'ingresso.",
     um_done_lead_nomail: "Ciao {name}, ecco il tuo QR code: mostralo all'ingresso. Salvalo o fai uno screenshot.",
-    um_done_code: "Codice", um_done_save: "Salva il QR", um_done_note: "15&nbsp;€ all'ingresso, drink incluso.",
+    um_done_code: "Codice", um_done_save: "Salva il QR", um_done_note: "15&nbsp;€ all'ingresso: apericena + 1 drink, dopo le 21:30 due drink inclusi.",
     um_aside_t: "Da ricordare",
     um_aside_1: "Il QR è personale: non condividerlo.",
     um_aside_2: "Porta un documento d'identità.",
@@ -48,23 +48,23 @@
     um_q1: "Devo pagare online?",
     um_a1: "No. La registrazione è gratuita e non chiediamo nessun pagamento online: paghi 15&nbsp;€ all'ingresso, dopo la scansione del tuo QR code.",
     um_q2: "Cosa include il prezzo?",
-    um_a2: "I 15&nbsp;€ includono l'apericena (cibo) e un drink.",
+    um_a2: "I 15&nbsp;€ includono l'apericena (cibo) e un drink. Dopo le 21:30 il prezzo resta 15&nbsp;€, ma i drink inclusi diventano due.",
     um_q3: "È solo per studenti?",
     um_a3: "UnitMilano nasce come il mercoledì universitario di Milano, pensato per gli studenti. Ti chiediamo l'università al momento della registrazione e di portare un documento d'identità."
   };
   var en = {
     um_badge: "New format · every Wednesday",
     um_subtitle: "Milan's university Wednesday.",
-    um_lead: "A new aperitivo-dinner format with house and commercial music and plenty of networking between students. Food, drinks and the city meeting up, in a single night.",
+    um_lead: "A new aperitivo-dinner format with house and commercial music and a community of students to meet. Food, drinks and the city meeting up, in a single night.",
     um_when_label: "When", um_when_value: "Wednesday, November 18", um_when_sub: "From 7:30 PM to 3:00 AM",
     um_where_label: "Where", um_where_sub: "Via Torino 64, Milan",
-    um_formula_label: "Deal", um_formula_sub: "Aperitivo dinner + 1 drink included",
+    um_formula_label: "Deal", um_formula_sub: "Aperitivo dinner + 1 drink included", um_formula_sub2: "After 9:30 PM: still €15, with 2 drinks included",
     um_cta: "Register for free", um_cta_note: "You pay at the door, after the QR code scan",
 
     um_format_eyebrow: "The format", um_format_title: "One night, three ingredients",
     um_f1_t: "Music", um_f1_p: "House and commercial: the right sound to start the night and dance until late.",
-    um_f2_t: "Networking", um_f2_p: "Meet students from every university in Milan: new friends, new projects.",
-    um_f3_t: "Aperitivo dinner", um_f3_p: "Food and a drink included in the €15: you arrive, you eat, you toast.",
+    um_f2_t: "Community", um_f2_p: "Meet students from every university in Milan: new friends, new projects.",
+    um_f3_t: "Aperitivo dinner", um_f3_p: "Food and a drink included in the €15: you arrive, you eat, you toast. After 9:30 PM it's still €15, with two drinks.",
 
     um_how_eyebrow: "How it works", um_how_title: "Three steps, no online payment",
     um_s1_t: "You register", um_s1_p: "Fill in the form below: it takes a minute and costs nothing.",
@@ -84,7 +84,7 @@
     um_done_eyebrow: "Registration confirmed", um_done_title: "You're in!",
     um_done_lead_mail: "Hi {name}, we sent your QR code by email (check your spam too). Here it is again: show it at the entrance.",
     um_done_lead_nomail: "Hi {name}, here is your QR code: show it at the entrance. Save it or take a screenshot.",
-    um_done_code: "Code", um_done_save: "Save the QR", um_done_note: "€15 at the door, drink included.",
+    um_done_code: "Code", um_done_save: "Save the QR", um_done_note: "€15 at the door: aperitivo dinner + 1 drink, two drinks included after 9:30 PM.",
     um_aside_t: "Remember",
     um_aside_1: "The QR code is personal: don't share it.",
     um_aside_2: "Bring a photo ID.",
@@ -97,7 +97,7 @@
     um_q1: "Do I have to pay online?",
     um_a1: "No. Registration is free and we don't ask for any online payment: you pay €15 at the door, after your QR code is scanned.",
     um_q2: "What does the price include?",
-    um_a2: "The €15 includes the aperitivo dinner (food) and one drink.",
+    um_a2: "The €15 includes the aperitivo dinner (food) and one drink. After 9:30 PM the price stays €15, but two drinks are included.",
     um_q3: "Is it for students only?",
     um_a3: "UnitMilano is Milan's university Wednesday, designed for students. We ask for your university when you register and for a photo ID at the entrance."
   };
