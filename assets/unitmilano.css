@@ -69,7 +69,7 @@
 }
 .um-lead{ max-width:620px; font-size:clamp(16px, 1.6vw, 19px); line-height:1.6; color:#e4ecff; margin:0 0 34px; }
 
-.um-info{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; margin-bottom:36px; }
+.um-info{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; margin-bottom:36px; }
 .um-info-card{
   display:flex; flex-direction:column; gap:6px;
   padding:22px 24px;
@@ -83,7 +83,7 @@
 .um-info-sub{ font-size:15px; color:var(--um-muted); }
 .um-info-card-hl{ background:var(--um-yellow); border-color:var(--um-yellow); }
 .um-info-card-hl .um-info-label{ color:#6b4a00; }
-.um-info-card-hl .um-info-value{ color:#14105a; font-size:clamp(34px, 4vw, 52px); }
+.um-info-card-hl .um-info-value{ color:#14105a; font-size:clamp(34px, 3.6vw, 48px); }
 .um-info-card-hl .um-info-sub{ color:#2a2166; font-weight:600; }
 .um-info-sub2{ margin-top:2px; }
 .um-info-card-hl .um-info-sub2{ color:#14105a; font-weight:700; }
@@ -220,11 +220,15 @@
 /* ---------- Telefono / tablet ---------- */
 @media (max-width: 900px){
   .um-hero{ padding:120px 0 64px; }
-  .um-info, .um-grid3, .um-steps{ grid-template-columns:1fr; }
+  .um-info{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .um-grid3, .um-steps{ grid-template-columns:1fr; }
   .um-section{ padding:68px 0; }
   .um-form-wrap{ grid-template-columns:1fr; gap:28px; }
   .um-aside{ position:static; }
   .um-h2{ margin-bottom:30px; }
+}
+@media (max-width: 600px){
+  .um-info{ grid-template-columns:1fr; }
 }
 @media (max-width: 520px){
   .um-row{ grid-template-columns:1fr; }

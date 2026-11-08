@@ -4887,7 +4887,7 @@ const FREE_REG_EMAIL_TEXT = {
     title: "Sei dentro!", hello: function(n){ return `Ciao ${n},`; },
     lead: "la tua registrazione è confermata. Mostra questo QR code all'ingresso.",
     when: "Quando", where: "Dove", formula: "Formula", code: "Codice",
-    formulaValue: "15 € all'ingresso · apericena + 1 drink inclusi (dopo le 21:30: 2 drink inclusi)",
+    formulaValue: "15 € all'ingresso · Formula apericena: cibo + 1 drink (fino alle 21:30) · Formula serata: 2 drink (dopo le 21:30)",
     reminders: ["Il QR è personale: non condividerlo.", "Porta un documento d'identità.", "Paghi 15 € all'ingresso, dopo la scansione del QR.", "Ingresso fino a esaurimento posti."],
     remindersTitle: "Promemoria", bye: "A mercoledì! — UnitMilano"
   },
@@ -4896,7 +4896,7 @@ const FREE_REG_EMAIL_TEXT = {
     title: "You're in!", hello: function(n){ return `Hi ${n},`; },
     lead: "your registration is confirmed. Show this QR code at the entrance.",
     when: "When", where: "Where", formula: "Deal", code: "Code",
-    formulaValue: "€15 at the door · aperitivo dinner + 1 drink included (2 drinks after 9:30 PM)",
+    formulaValue: "€15 at the door · Aperitivo deal: food + 1 drink (until 9:30 PM) · Night deal: 2 drinks (after 9:30 PM)",
     reminders: ["The QR code is personal: don't share it.", "Bring a photo ID.", "You pay €15 at the door, after the QR scan.", "Entry until capacity is reached."],
     remindersTitle: "Reminders", bye: "See you Wednesday! — UnitMilano"
   }
