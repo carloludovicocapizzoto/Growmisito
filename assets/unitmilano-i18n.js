@@ -4,7 +4,7 @@
 (function(){
   if (typeof GROWMI_I18N === 'undefined') return;
   var it = {
-    um_badge: "Nuovo format · ogni mercoledì",
+    um_badge: "Nuovo format",
     um_subtitle: "Il mercoledì universitario di Milano.",
     um_lead: "Un nuovo format di apericena con musica house e commerciale e una community di studenti da conoscere. Cibo, drink e la città che si incontra, in una sola serata.",
     um_when_label: "Quando", um_when_value: "Mercoledì 18 novembre", um_when_sub: "Dalle 19:30 alle 3:00",
@@ -54,7 +54,7 @@
     um_a3: "UnitMilano nasce come il mercoledì universitario di Milano, pensato per gli studenti. Ti chiediamo l'università al momento della registrazione e di portare un documento d'identità."
   };
   var en = {
-    um_badge: "New format · every Wednesday",
+    um_badge: "New format",
     um_subtitle: "Milan's university Wednesday.",
     um_lead: "A new aperitivo-dinner format with house and commercial music and a community of students to meet. Food, drinks and the city meeting up, in a single night.",
     um_when_label: "When", um_when_value: "Wednesday, November 18", um_when_sub: "From 7:30 PM to 3:00 AM",
