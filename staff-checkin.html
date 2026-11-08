@@ -265,6 +265,7 @@
   <div class="stats-box"><span class="n" id="histReward5">—</span><span class="l">Premi 5°</span></div>
 </div>
 <button type="button" class="history-link" id="attendeesLink" hidden>👥 Lista biglietti (check-in manuale)</button>
+<button type="button" class="history-link" id="exportLink" hidden>📥 Esporta CSV (nome, telefono, università, pagato)</button>
 <div class="attendees-search-wrap" id="attendeesSearchWrap">
   <input type="text" id="attendeesSearch" placeholder="Cerca per nome...">
 </div>
@@ -372,6 +373,7 @@
     document.getElementById("historyBox").classList.remove("open");
     historyOpen = false;
     document.getElementById("attendeesLink").hidden = m !== "checkin" || !selectedEvent;
+    document.getElementById("exportLink").hidden = m !== "checkin" || !selectedEvent;
     document.getElementById("attendeesBox").classList.remove("open");
     document.getElementById("attendeesSearchWrap").classList.remove("open");
     attendeesOpen = false;
@@ -407,6 +409,7 @@
     document.getElementById("historyBox").classList.remove("open");
     historyOpen = false;
     document.getElementById("attendeesLink").hidden = mode !== "checkin" || !selectedEvent;
+    document.getElementById("exportLink").hidden = mode !== "checkin" || !selectedEvent;
     document.getElementById("attendeesBox").classList.remove("open");
     document.getElementById("attendeesSearchWrap").classList.remove("open");
     attendeesOpen = false;
@@ -601,15 +604,56 @@
     }
   }
 
-  async function checkTicket(code){
+  // Export CSV delle registrazioni/biglietti dell'evento selezionato (stesso file del pannello
+  // azienda, con università, telefono e pagato/non pagato). Scarica con la chiave staff.
+  document.getElementById("exportLink").addEventListener("click", async function(){
+    if (!selectedEvent) return;
+    try {
+      var res = await fetch("/api/export-attendees?event=" + encodeURIComponent(selectedEvent), { headers: { "X-Staff-Key": getStaffKey() } });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) { alert("Export non riuscito, riprova."); return; }
+      var blob = await res.blob();
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "registrazioni-" + selectedEvent + ".csv";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+    } catch (e) { alert("Errore di rete, riprova."); }
+  });
+
+  // Registrazioni gratuite (pagamento all'ingresso): la scansione NON fa entrare nessuno da sola —
+  // mostra nome/università e l'importo da incassare; solo "Segna entrato + pagato" conferma.
+  function showPendingPayment(data){
+    var eur = ((data.amountDueCents || 0) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+    result.className = "valid";
+    result.innerHTML =
+      '<div class="icon">💶</div>' +
+      '<div class="title">' + esc(data.name || "Registrato") + '</div>' +
+      '<div class="detail">' + [data.university, data.eventName].filter(Boolean).map(esc).join(" — ") + '</div>' +
+      '<div class="title" style="font-size:28px;margin-bottom:14px;">Da incassare: ' + esc(eur) + '</div>' +
+      '<div class="rewards"><button type="button" class="redeem-btn" id="confirmDoorBtn" style="padding:16px 14px;font-size:16px;">Segna entrato + pagato ' + esc(eur) + '</button></div>';
+    if (navigator.vibrate) navigator.vibrate(80);
+    beep([880], 0.15);
+    document.getElementById("confirmDoorBtn").addEventListener("click", async function(){
+      this.disabled = true;
+      this.textContent = "…";
+      await checkTicket(data.code, true);
+    });
+  }
+
+  async function checkTicket(code, confirmPayment){
     try {
       var res = await fetch("/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Staff-Key": getStaffKey() },
-        body: JSON.stringify({ code: code, eventSlug: selectedEvent || undefined })
+        body: JSON.stringify({ code: code, eventSlug: selectedEvent || undefined, confirmPayment: confirmPayment === true ? true : undefined })
       });
       if (res.status === 401) { onUnauthorized(); return; }
       var data = await res.json();
+      if (data.valid && data.pendingPayment) {
+        showPendingPayment(data);
+        return;
+      }
       if (data.valid) {
         refreshStats();
         if (attendeesOpen) loadAttendeesList();
@@ -628,18 +672,18 @@
         } else if (data.reward5) {
           rewardBanner = '<div class="reward unlocked" style="margin-top:12px;"><span>🎉 5° evento — coupon ingresso gratis inviato via email!</span></div>';
         }
-        showResult(true, data.eventName || "Ingresso valido", [data.name, data.email, data.tierName].filter(Boolean).join(" — "), rewardBanner);
+        showResult(true, data.eventName || "Ingresso valido", [data.name, data.university, data.email, data.tierName].filter(Boolean).join(" — ") + (data.paid ? " — ✓ pagato " + ((data.amountPaidCents || 0) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" }) : ""), rewardBanner);
         if (data.reward3) {
           document.getElementById("redeemNowBtn").addEventListener("click", function(){
             redeemReward(this, data.email, true, "3");
           });
         }
       } else if (data.reason === "already_used") {
-        showResult(false, "Già usato", data.usedAt ? ("Usato il " + new Date(data.usedAt).toLocaleString("it-IT")) : "");
+        showResult(false, "Già usato", [data.name, data.university].filter(Boolean).join(" — ") + (data.usedAt ? ((data.name || data.university ? " · " : "") + "Usato il " + new Date(data.usedAt).toLocaleString("it-IT")) : ""));
       } else if (data.reason === "wrong_event") {
         showResult(false, "Evento sbagliato", "Questo biglietto è per: " + (data.eventName || "un altro evento"));
       } else {
-        showResult(false, "Biglietto non trovato", "Controlla il codice");
+        showResult(false, "QR non valido", "Biglietto non trovato: controlla il codice");
       }
     } catch (e) {
       showResult(false, "Errore di rete", "Riprova");
