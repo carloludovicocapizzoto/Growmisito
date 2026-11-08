@@ -240,6 +240,14 @@ async function handleFetch(request, env, ctx) {
       }
     }
 
+    if (url.pathname === "/api/admin/ticket-fix-email" && request.method === "POST") {
+      try {
+        return await handleAdminTicketFixEmail(request, env);
+      } catch (err) {
+        console.log("Errore admin/ticket-fix-email:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
     if (url.pathname === "/api/admin/checkin-undo" && request.method === "POST") {
       try {
         return await handleAdminUndoCheckin(request, env);
@@ -1590,6 +1598,21 @@ function eventPageHTML(event, slug) {
     return `<section class="${darkTheme ? "ed-dark-section" : "ed-section-tight"}"><div class="wrap">${html}</div></section>`;
   })();
 
+  // Anteprima quando il link viene condiviso (WhatsApp, Instagram, iMessage...): senza questi tag
+  // mostrano solo il titolo, senza immagine. Gli URL devono essere assoluti.
+  const ogEsc = function(t){ return String(t || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); };
+  const ogImageKey = event.socialImageKey || event.cardImageKey || event.coverImageKey || event.heroImageKey;
+  const ogImageUrl = ogImageKey ? (function(u){ return /^https?:\/\//.test(u) ? u : "https://growmi.it" + (u.startsWith("/") ? "" : "/") + u; })(mediaUrl(ogImageKey)) : "";
+  const ogTags = [
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="GrowMi">`,
+    `<meta property="og:title" content="${ogEsc(event.name)} — GrowMi">`,
+    `<meta property="og:description" content="${ogEsc(`${event.dateDisplay || ""}${event.location ? " · " + event.location : ""}${event.teaser ? " — " + event.teaser : ""}`)}">`,
+    `<meta property="og:url" content="https://growmi.it/evento/${ogEsc(slug)}">`,
+    ogImageUrl ? `<meta property="og:image" content="${ogEsc(ogImageUrl)}">` : "",
+    `<meta name="twitter:card" content="${ogImageUrl ? "summary_large_image" : "summary"}">`
+  ].filter(Boolean).join("\n");
+
   return `<!DOCTYPE html>
 <html lang="it">
 <head>
@@ -1598,6 +1621,7 @@ function eventPageHTML(event, slug) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${event.name} — GrowMi</title>
 <meta name="description" content="${event.teaser || event.name}">
+${ogTags}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -2083,6 +2107,77 @@ async function handleAdminUndoCheckin(request, env) {
   });
 
   return jsonResponse({ ok: true });
+}
+
+// Correzione manuale dell'indirizzo di un biglietto (il cliente ha scritto male l'email
+// all'acquisto): sposta il biglietto sulla email giusta e gli rimanda QR e PDF. Se il biglietto è
+// ancora valido (non entrato) ne emette uno con un NUOVO codice e cancella il vecchio — così il
+// QR finito alla email sbagliata (magari di un estraneo) smette di funzionare all'ingresso. Un
+// biglietto già usato non si rimanda: si corregge solo l'email sul record.
+async function handleAdminTicketFixEmail(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+
+  const body = await request.json().catch(function(){ return {}; });
+  const code = String(body.code || "").trim().toUpperCase();
+  const newEmail = String(body.email || "").trim().toLowerCase().slice(0, 200);
+  if (!code) return jsonResponse({ error: "codice biglietto mancante" }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return jsonResponse({ error: "email non valida" }, 400);
+
+  const raw = await env.TICKETS.get(`ticket:${code}`);
+  if (!raw) return jsonResponse({ error: "biglietto non trovato" }, 404);
+  const ticket = JSON.parse(raw);
+  const oldEmail = ticket.email;
+
+  if (ticket.used) {
+    ticket.email = newEmail;
+    ticket.emailCorrectedFrom = oldEmail;
+    await env.TICKETS.put(`ticket:${code}`, JSON.stringify(ticket), {
+      metadata: { used: true, name: ticket.name, email: newEmail, tierName: ticket.tierName, usedAt: ticket.usedAt, eventName: ticket.eventName, eventDateIso: ticket.eventDateIso, eventSlug: ticket.eventSlug, tierId: ticket.tierId, source: ticket.source || "stripe" }
+    });
+    return jsonResponse({ ok: true, oldEmail, newEmail, code, reissued: false, sent: false });
+  }
+
+  const newCode = generateTicketCode();
+  const updated = Object.assign({}, ticket, { email: newEmail, emailCorrectedFrom: oldEmail, replacesCode: code });
+  await env.TICKETS.put(`ticket:${newCode}`, JSON.stringify(updated), {
+    metadata: { used: false, eventSlug: ticket.eventSlug, tierId: ticket.tierId, email: newEmail, eventName: ticket.eventName, eventDateIso: ticket.eventDateIso, tierName: ticket.tierName, source: ticket.source || "stripe" }
+  });
+  await env.TICKETS.delete(`ticket:${code}`);
+
+  let sent = false, sendError = null;
+  if (env.RESEND_API_KEY) {
+    try {
+      const eventInfo = ticket.eventSlug ? await getEvent(env, ticket.eventSlug) : null;
+      const qrSvg = await QRCode.toString(newCode, { type: "svg", margin: 1, width: 400 });
+      const attachments = [];
+      try {
+        const pdfBytes = await buildTicketPDF({ name: ticket.name, eventName: ticket.eventName, eventDate: ticket.eventDate, eventLocation: ticket.eventLocation, tierName: ticket.tierName, ticketCode: newCode });
+        attachments.push({ filename: "biglietto-growmi.pdf", content: Buffer.from(pdfBytes).toString("base64") });
+      } catch (e) {
+        console.log("Errore generazione PDF biglietto (correzione email):", e.message);
+      }
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "GrowMi <noreply@growmi.it>",
+          to: newEmail,
+          subject: `Il tuo biglietto — ${ticket.eventName}`,
+          html: buildTicketEmailHTML({ name: ticket.name, eventName: ticket.eventName, eventDate: ticket.eventDate, eventLocation: ticket.eventLocation, eventTeaser: eventInfo?.teaser || "", tierName: ticket.tierName, optionId: ticket.optionId, ticketCode: newCode, qrBase64: btoa(qrSvg) }),
+          attachments
+        })
+      });
+      sent = res.ok;
+      if (!res.ok) sendError = "Resend ha risposto " + res.status;
+    } catch (e) {
+      sendError = e.message;
+    }
+  } else {
+    sendError = "RESEND_API_KEY non configurato";
+  }
+  return jsonResponse({ ok: true, oldEmail, newEmail, oldCode: code, newCode, reissued: true, sent, sendError });
 }
 
 // Registra alla porta chi paga in contanti/POS fisico, senza passare da Stripe: crea comunque un
@@ -6083,6 +6178,9 @@ function validateEventPayload(body, existingTiers, sold) {
   const cardImageKey = String(body.cardImageKey || "").trim() || null;
   // Banda decorativa a tutta larghezza in fondo alla pagina evento (vedi footerBandBlock).
   const footerImageKey = String(body.footerImageKey || "").trim() || null;
+  // Immagine per l'anteprima quando si condivide il link (WhatsApp, Instagram...): formato
+  // consigliato 1200×630. Vuota = ricade su locandina, card o hero (vedi eventPageHTML).
+  const socialImageKey = String(body.socialImageKey || "").trim() || null;
   const footerImageMobileKey = String(body.footerImageMobileKey || "").trim() || null;
   const coverPosition = String(body.coverPosition || "center").trim().slice(0, 30);
   const coverZoom = clampImageZoom(body.coverZoom);
@@ -6192,7 +6290,7 @@ function validateEventPayload(body, existingTiers, sold) {
     }
   }
 
-  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
+  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, socialImageKey, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
 }
 
 // image/gif incluso apposta per le newsletter: un GIF animato è l'unico modo che parte da solo e

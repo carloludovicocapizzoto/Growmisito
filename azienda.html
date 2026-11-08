@@ -923,6 +923,14 @@
           </div>
 
           <div>
+            <label class="az-u-label13">Immagine per l'anteprima quando condividi il link</label>
+            <p class="az-u-hint10">È l'immagine che compare su WhatsApp, Instagram e simili quando qualcuno condivide il link dell'evento. Formato consigliato 1200×630. Se non ne carichi una, si usa la copertina della card.</p>
+            <div class="az-image-preview" id="az-ev-social-preview" style="aspect-ratio:1200/630;">Nessuna immagine</div>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" id="az-ev-social-input">
+            <button type="button" class="az-mini-btn danger" id="az-ev-social-remove" hidden>Rimuovi</button>
+          </div>
+
+          <div>
             <label class="az-u-label13">Loghi sponsor</label>
             <p class="az-u-hint10">Carica quanti loghi vuoi, poi scegli come mostrarli.</p>
             <div class="az-field" style="max-width:320px;">
@@ -3622,6 +3630,7 @@
   var evCoverKey = null;
   var evCardKey = null;
   var evFooterKey = null;
+  var evSocialKey = null;
   var evFooterMobileKey = null;
   var evCoverFraming = { position: 'center', zoom: 1 };
   var evGallery = [];
@@ -3787,6 +3796,23 @@
     try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evFooterMobileKey }) }); } catch (e) {}
     evFooterMobileKey = null;
     renderFooterMobilePreview();
+  });
+  function renderSocialPreview(){
+    document.getElementById('az-ev-social-preview').innerHTML = imagePreviewHTML(evSocialKey);
+    document.getElementById('az-ev-social-remove').hidden = !evSocialKey;
+  }
+  document.getElementById('az-ev-social-input').addEventListener('change', async function(){
+    var file = this.files[0];
+    this.value = '';
+    if (!file) return;
+    try { evSocialKey = await uploadEventImage(file, 'social'); renderSocialPreview(); }
+    catch (err) { alert(err.message); }
+  });
+  document.getElementById('az-ev-social-remove').addEventListener('click', async function(){
+    if (!evSocialKey) return;
+    try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evSocialKey }) }); } catch (e) {}
+    evSocialKey = null;
+    renderSocialPreview();
   });
   document.getElementById('az-ev-card-input').addEventListener('change', async function(){
     var file = this.files[0];
@@ -6401,6 +6427,8 @@
     evCardKey = event ? (event.cardImageKey || null) : null;
     evFooterKey = event ? (event.footerImageKey || null) : null;
     renderFooterPreview();
+    evSocialKey = event ? (event.socialImageKey || null) : null;
+    renderSocialPreview();
     evFooterMobileKey = event ? (event.footerImageMobileKey || null) : null;
     renderFooterMobilePreview();
     evCoverFraming = { position: (event && event.coverPosition) || 'center', zoom: (event && event.coverZoom) || 1 };
@@ -6509,6 +6537,7 @@
       coverImageKey: evCoverKey,
       cardImageKey: evCardKey,
       footerImageKey: evFooterKey,
+      socialImageKey: evSocialKey,
       footerImageMobileKey: evFooterMobileKey,
       coverPosition: evCoverFraming.position,
       coverZoom: evCoverFraming.zoom,
