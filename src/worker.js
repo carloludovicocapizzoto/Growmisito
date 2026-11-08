@@ -2240,7 +2240,7 @@ async function handleManualCheckin(request, env) {
   }
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
 
-  const { eventSlug, tierId, optionId, name, email, wantsCard } = await request.json();
+  const { eventSlug, tierId, optionId, name, email, wantsCard, phone, university } = await request.json();
   if (!eventSlug || !tierId || !optionId) {
     return jsonResponse({ error: "evento, fascia e opzione sono obbligatori" }, 400);
   }
@@ -2259,7 +2259,8 @@ async function handleManualCheckin(request, env) {
   const ticket = {
     email: cleanEmail,
     name: cleanName,
-    phone: null,
+    phone: String(phone || "").trim().slice(0, 30) || null,
+    university: FREE_REG_UNIVERSITIES.includes(String(university || "")) ? String(university) : null,
     eventName: event.name,
     eventDate: event.dateDisplay,
     eventDateIso: event.dateIso,
@@ -2531,7 +2532,12 @@ async function fetchEventRoster(env, slug) {
         code: key.name.slice("ticket:".length),
         name: ticket.name, email: ticket.email, tierName: ticket.tierName,
         used: !!ticket.used, usedAt: ticket.usedAt || null,
-        source: ticket.source === "walkin" ? "walkin" : "stripe"
+        source: ticket.source === "walkin" ? "walkin" : "stripe",
+        // Per lo scanner UnitMilano (unit-checkin.html): università, telefono, importo e se ha già
+        // pagato all'ingresso (source "registration" = registrazione gratuita, paga in loco).
+        kind: ticket.source || "stripe", university: ticket.university || null, phone: ticket.phone || null,
+        paid: ticket.source === "registration" ? ticket.paid === true : true,
+        amountCents: Number(ticket.amountTotal) || 0, dueCents: Number(ticket.doorPriceCents) || 0
       });
     }
     cursor = page.list_complete ? undefined : page.cursor;
@@ -7941,7 +7947,7 @@ async function applySiteTheme(response, theme) {
 function isPublicThemedPath(pathname) {
   if (pathname === "/azienda.html" || pathname === "/azienda") return false;
   const last = pathname.split("/").pop() || "";
-  if (last.startsWith("staff-")) return false;
+  if (last.startsWith("staff-") || last.startsWith("unit-")) return false;
   return true;
 }
 

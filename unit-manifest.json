@@ -1,0 +1,11 @@
+{
+  "name": "UnitMilano Check-in",
+  "short_name": "Unit Check-in",
+  "start_url": "/unit-checkin",
+  "display": "standalone",
+  "background_color": "#050D36",
+  "theme_color": "#050D36",
+  "icons": [
+    { "src": "assets/img/unit-icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

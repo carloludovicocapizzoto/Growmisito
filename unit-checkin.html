@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Staff — UnitMilano</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#050D36">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UnitMilano Check-in">
+<link rel="manifest" href="unit-manifest.json">
+<link rel="apple-touch-icon" href="assets/img/unit-icon.png">
+<link rel="icon" href="assets/img/unit-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Scanner dello staff per UnitMilano: stessa impostazione di staff-checkin.html (chiave staff,
+     fotocamera, codice a mano, lista, vendita in loco) ma bloccato sull'evento unitmilano, con la
+     grafica blu/giallo della locandina e senza la parte loyalty card. */
+  :root{
+    --night:#050D36;
+    --navy:#081A63;
+    --blue:#0B2BB4;
+    --yellow:#FDC631;
+    --ink-on-yellow:#14105A;
+    --cream:#EEF3FF;
+    --green:#2ECC71;
+    --red:#E0217A;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--night); color:var(--cream);
+    font-family:'Inter', system-ui, sans-serif;
+    display:flex; flex-direction:column; min-height:100vh; min-height:100dvh;
+  }
+  .header-row{ padding:16px 20px; text-align:center; border-bottom:1px solid rgba(238,243,255,0.14); }
+  .header-row h1{ font-family:'Space Grotesk', sans-serif; font-size:19px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .header-row h1 span{ color:var(--yellow); }
+  .header-row p{ font-size:12px; color:rgba(238,243,255,0.6); margin-top:3px; }
+
+  main{ flex:1; display:flex; flex-direction:column; padding:18px 20px 12px; gap:16px; max-width:480px; margin:0 auto; width:100%; }
+
+  #reader{ width:100%; border-radius:16px; overflow:hidden; background:#000; }
+  #reader video{ border-radius:16px; }
+
+  .manual-row{ display:flex; gap:10px; }
+  .manual-row input{
+    flex:1; min-width:0; padding:14px 16px; border-radius:12px; border:1.5px solid rgba(238,243,255,0.25);
+    background:rgba(238,243,255,0.07); color:var(--cream); font-size:16px;
+    font-family:'Space Grotesk', sans-serif; letter-spacing:0.05em; text-transform:uppercase;
+  }
+  .manual-row input::placeholder{ color:rgba(238,243,255,0.42); text-transform:none; letter-spacing:normal; }
+  .btn-y{
+    padding:14px 20px; border-radius:12px; border:none; background:var(--yellow); color:var(--ink-on-yellow);
+    font-weight:700; font-family:'Space Grotesk', sans-serif; cursor:pointer; font-size:14px;
+  }
+  .btn-y:disabled{ opacity:.6; cursor:default; }
+
+  #result{ border-radius:16px; padding:22px; text-align:center; display:none; }
+  #result.valid{ background:rgba(46,204,113,0.15); border:2px solid var(--green); display:block; }
+  #result.invalid{ background:rgba(224,33,122,0.15); border:2px solid var(--red); display:block; }
+  #result.pending{ background:rgba(253,198,49,0.14); border:2px solid var(--yellow); display:block; }
+  #result .icon{ font-size:40px; margin-bottom:8px; }
+  #result .title{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:21px; margin-bottom:6px; }
+  #result .detail{ font-size:14px; color:rgba(238,243,255,0.78); margin-bottom:14px; }
+  #result .due{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:30px; color:var(--yellow); margin-bottom:14px; }
+  #result .confirm-btn{
+    width:100%; padding:17px 14px; border-radius:12px; border:none; background:var(--yellow); color:var(--ink-on-yellow);
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:16px; cursor:pointer;
+  }
+  #result .confirm-btn:disabled{ opacity:.6; cursor:default; }
+
+  .stats-bar{ display:flex; gap:10px; padding:14px 20px; border-bottom:1px solid rgba(238,243,255,0.14); max-width:480px; margin:0 auto; width:100%; }
+  .stats-box{ flex:1; text-align:center; background:rgba(238,243,255,0.07); border-radius:12px; padding:10px 6px; }
+  .stats-box .n{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:21px; display:block; }
+  .stats-box .l{ font-size:10.5px; color:rgba(238,243,255,0.58); text-transform:uppercase; letter-spacing:0.04em; }
+  .stats-box.hl .n{ color:var(--yellow); }
+
+  .key-gate{
+    position:fixed; inset:0; background:var(--night); display:flex; align-items:center;
+    justify-content:center; padding:24px; z-index:10;
+  }
+  .key-gate.hidden{ display:none; }
+  .key-card{ max-width:340px; width:100%; text-align:center; }
+  .key-card h2{ font-family:'Space Grotesk', sans-serif; font-size:21px; margin-bottom:10px; text-transform:uppercase; }
+  .key-card h2 span{ color:var(--yellow); }
+  .key-card p{ font-size:13.5px; color:rgba(238,243,255,0.62); margin-bottom:18px; }
+  .key-card input{
+    width:100%; padding:14px 16px; border-radius:12px; border:1.5px solid rgba(238,243,255,0.25);
+    background:rgba(238,243,255,0.07); color:var(--cream); font-size:15px; margin-bottom:12px;
+  }
+  .key-card button{ width:100%; }
+  .change-key{
+    text-align:center; font-size:12px; color:rgba(238,243,255,0.42); text-decoration:underline;
+    background:none; border:none; cursor:pointer; padding:10px;
+  }
+
+  .link-btn{
+    text-align:center; font-size:12.5px; color:rgba(238,243,255,0.6); text-decoration:underline;
+    background:none; border:none; cursor:pointer; padding:6px; width:100%;
+  }
+  .attendees-search-wrap{ display:none; }
+  .attendees-search-wrap.open{ display:block; }
+  .attendees-search-wrap input{
+    width:100%; padding:11px 14px; border-radius:10px; border:1.5px solid rgba(238,243,255,0.25);
+    background:rgba(238,243,255,0.07); color:var(--cream); font-size:14px; font-family:'Inter',sans-serif;
+  }
+  .attendees-box{ display:none; max-height:38vh; overflow-y:auto; flex-direction:column; gap:8px; }
+  .attendees-box.open{ display:flex; }
+  .attendee-row{
+    display:flex; align-items:center; gap:12px;
+    padding:9px 12px; border-radius:10px; background:rgba(238,243,255,0.07); font-size:12.5px;
+  }
+  .attendee-row.is-used{ background:rgba(46,204,113,0.13); }
+  .attendee-row input[type="checkbox"]{ flex-shrink:0; width:22px; height:22px; accent-color:var(--green); cursor:pointer; }
+  .attendee-row input[type="checkbox"]:not(:checked){ accent-color:var(--yellow); }
+  .attendee-row input[type="checkbox"]:disabled{ cursor:default; opacity:1; }
+  .attendee-row .who{ min-width:0; flex:1; }
+  .attendee-row .who .n{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .attendee-row .who .t{ color:rgba(238,243,255,0.58); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .attendee-row .state{ flex-shrink:0; font-size:11.5px; text-align:right; color:rgba(238,243,255,0.62); }
+  .attendee-row .state b{ color:var(--yellow); display:block; }
+  .attendee-row.is-used .state b{ color:var(--green); }
+  .attendees-empty{ text-align:center; font-size:12.5px; color:rgba(238,243,255,0.52); padding:8px; }
+
+  .walkin-btn{
+    padding:13px; border-radius:12px; border:1.5px solid rgba(238,243,255,0.28); background:rgba(238,243,255,0.07);
+    color:var(--cream); font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:13.5px; cursor:pointer;
+  }
+  .walkin-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:30; display:flex; align-items:center;
+    justify-content:center; padding:20px; overflow-y:auto;
+  }
+  .walkin-overlay[hidden]{ display:none; }
+  .walkin-card{ background:var(--navy); border-radius:18px; padding:24px 22px; max-width:360px; width:100%; margin:auto; }
+  .walkin-card h2{ font-family:'Space Grotesk', sans-serif; font-size:18px; margin-bottom:6px; }
+  .walkin-event{ font-size:12.5px; color:rgba(238,243,255,0.65); margin-bottom:16px; }
+  .walkin-field{ margin-bottom:13px; }
+  .walkin-field label{ display:block; font-size:12.5px; margin-bottom:6px; color:rgba(238,243,255,0.78); }
+  .walkin-field select, .walkin-field input{
+    width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid rgba(238,243,255,0.25);
+    background:rgba(238,243,255,0.07); color:var(--cream); font-size:15px; font-family:'Inter',sans-serif;
+  }
+  .walkin-field select option{ color:#000; }
+  .walkin-error{ color:#ff9db8; font-size:12.5px; margin-bottom:10px; }
+  .walkin-actions{ display:flex; gap:10px; }
+  .walkin-actions button{
+    flex:1; padding:13px; border-radius:10px; border:none; font-family:'Space Grotesk',sans-serif;
+    font-weight:700; font-size:13.5px; cursor:pointer;
+  }
+  #walkinCancel{ background:rgba(238,243,255,0.12); color:var(--cream); }
+  #walkinSubmit{ background:var(--yellow); color:var(--ink-on-yellow); }
+  #walkinSubmit:disabled{ opacity:.6; }
+</style>
+</head>
+<body>
+
+<div class="key-gate" id="keyGate">
+  <div class="key-card">
+    <h2>Staff <span>UnitMilano</span></h2>
+    <p>Inserisci la chiave staff per accedere allo scanner.</p>
+    <input type="password" id="keyInput" placeholder="Chiave staff" autocomplete="off">
+    <button type="button" class="btn-y" id="keySubmit">Entra</button>
+  </div>
+</div>
+
+<div class="header-row">
+  <h1>Unit<span>Milano</span> · Check-in</h1>
+  <p>Mercoledì 18 novembre · Art Mall Milano</p>
+</div>
+
+<div class="stats-bar">
+  <div class="stats-box"><span class="n" id="statTotal">—</span><span class="l">Registrati</span></div>
+  <div class="stats-box"><span class="n" id="statIn">—</span><span class="l">Entrati</span></div>
+  <div class="stats-box hl"><span class="n" id="statCash">—</span><span class="l">Incassato</span></div>
+</div>
+
+<main>
+  <div id="reader"></div>
+
+  <div class="manual-row">
+    <input type="text" id="manualCode" placeholder="Codice del QR" autocomplete="off" autocapitalize="characters">
+    <button type="button" class="btn-y" id="manualSubmit">Controlla</button>
+  </div>
+
+  <div id="result"></div>
+
+  <button type="button" class="walkin-btn" id="walkinBtn">💶 Ingresso senza registrazione</button>
+
+  <button type="button" class="link-btn" id="attendeesLink">👥 Lista registrati (check-in manuale)</button>
+  <div class="attendees-search-wrap" id="attendeesSearchWrap">
+    <input type="text" id="attendeesSearch" placeholder="Cerca per nome...">
+  </div>
+  <div class="attendees-box" id="attendeesBox"></div>
+
+  <button type="button" class="link-btn" id="exportLink">📥 Esporta CSV (nome, telefono, università, pagato)</button>
+  <button type="button" class="change-key" id="changeKey">Cambia chiave staff</button>
+</main>
+
+<div class="walkin-overlay" id="walkinOverlay" hidden>
+  <div class="walkin-card">
+    <h2>Ingresso senza registrazione</h2>
+    <p class="walkin-event">Paga <strong id="walkinPrice">15 €</strong> adesso. Il biglietto viene registrato come già entrato e pagato.</p>
+    <div class="walkin-field">
+      <label for="walkinName">Nome e cognome</label>
+      <input type="text" id="walkinName" placeholder="Nome e cognome" autocomplete="off">
+    </div>
+    <div class="walkin-field">
+      <label for="walkinEmail">Email</label>
+      <input type="email" id="walkinEmail" placeholder="Email" autocomplete="off">
+    </div>
+    <div class="walkin-field">
+      <label for="walkinPhone">Telefono (facoltativo)</label>
+      <input type="tel" id="walkinPhone" placeholder="Telefono" autocomplete="off">
+    </div>
+    <div class="walkin-field">
+      <label for="walkinUni">Università</label>
+      <select id="walkinUni">
+        <option value="">—</option>
+        <option>Bocconi</option><option>Statale</option><option>Politecnico</option><option>Cattolica</option>
+        <option>Bicocca</option><option>IULM</option><option>NABA/IED</option><option>Altro</option>
+      </select>
+    </div>
+    <p class="walkin-error" id="walkinError" hidden></p>
+    <div class="walkin-actions">
+      <button type="button" id="walkinCancel">Annulla</button>
+      <button type="button" id="walkinSubmit">Segna entrato + pagato</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function(){
+  var EVENT_SLUG = "unitmilano";
+  var KEY_STORAGE = "growmi_staff_key"; // stessa chiave dello scanner GrowMi: un solo login staff
+  var scanner = null;
+  var busy = false;
+  var attendeesOpen = false;
+  var rosterItems = [];
+  var DOOR_CENTS = 1500; // sostituito dal valore vero letto dal server appena disponibile
+
+  var keyGate = document.getElementById("keyGate");
+  var keyInput = document.getElementById("keyInput");
+  var result = document.getElementById("result");
+  var manualCode = document.getElementById("manualCode");
+
+  function getKey(){ try { return localStorage.getItem(KEY_STORAGE); } catch (e) { return null; } }
+  function setKey(k){ try { localStorage.setItem(KEY_STORAGE, k); } catch (e) {} }
+  function clearKey(){ try { localStorage.removeItem(KEY_STORAGE); } catch (e) {} }
+  function headers(json){
+    var h = { "X-Staff-Key": getKey() || "" };
+    if (json) h["Content-Type"] = "application/json";
+    return h;
+  }
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function eur(cents){
+    return ((cents || 0) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: (cents % 100 === 0 ? 0 : 2) });
+  }
+  function onUnauthorized(){
+    clearKey();
+    keyGate.classList.remove("hidden");
+  }
+
+  // Suono generato al volo: bip alto per l'esito positivo, due bassi per un rifiuto — riconoscibili
+  // anche senza guardare lo schermo, utile in un ingresso buio e rumoroso.
+  var audioCtx = null;
+  function beep(freqs, dur){
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var t = audioCtx.currentTime;
+      freqs.forEach(function(f, i){
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = "sine"; o.frequency.value = f;
+        g.gain.setValueAtTime(0.2, t + i * (dur + 0.06));
+        g.gain.exponentialRampToValueAtTime(0.001, t + i * (dur + 0.06) + dur);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(t + i * (dur + 0.06)); o.stop(t + i * (dur + 0.06) + dur);
+      });
+    } catch (e) { /* audio non disponibile: non blocca la scansione */ }
+  }
+
+  function showResult(kind, icon, title, detail, extraHtml){
+    result.className = kind;
+    result.innerHTML = '<div class="icon">' + icon + '</div><div class="title">' + esc(title) + '</div>' +
+      '<div class="detail">' + (detail || "") + '</div>' + (extraHtml || "");
+    if (navigator.vibrate) navigator.vibrate(kind === "invalid" ? [60, 60, 60] : 80);
+    beep(kind === "invalid" ? [330, 330] : [880], kind === "invalid" ? 0.12 : 0.15);
+  }
+
+  // Prima scansione: mostra chi è e quanto incassare. Solo "Segna entrato + pagato" fa entrare la
+  // persona e porta i 15 € negli incassi (vedi handleCheckin in src/worker.js, confirmPayment).
+  function showPending(d){
+    result.className = "pending";
+    result.innerHTML = '<div class="icon">💶</div><div class="title">' + esc(d.name || "Registrato") + '</div>' +
+      '<div class="detail">' + esc([d.university, d.email].filter(Boolean).join(" · ")) + '</div>' +
+      '<div class="due">Da incassare: ' + esc(eur(d.amountDueCents)) + '</div>' +
+      '<button type="button" class="confirm-btn" id="confirmBtn">Segna entrato + pagato ' + esc(eur(d.amountDueCents)) + '</button>';
+    if (navigator.vibrate) navigator.vibrate(80);
+    beep([880], 0.15);
+    document.getElementById("confirmBtn").addEventListener("click", async function(){
+      this.disabled = true; this.textContent = "…";
+      await checkTicket(d.code, true);
+    });
+  }
+
+  async function checkTicket(code, confirmPayment){
+    try {
+      var res = await fetch("/api/checkin", {
+        method: "POST", headers: headers(true),
+        body: JSON.stringify({ code: code, eventSlug: EVENT_SLUG, confirmPayment: confirmPayment === true ? true : undefined })
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      var d = await res.json();
+      if (d.valid && d.pendingPayment) { showPending(d); return; }
+      if (d.valid) {
+        refresh();
+        var who = [d.university, d.email].filter(Boolean).join(" · ");
+        showResult("valid", "✅", d.name || "Ingresso valido",
+          esc(who) + (d.paid ? '<br><strong>✓ Pagato ' + esc(eur(d.amountPaidCents)) + '</strong>' : ""));
+      } else if (d.reason === "already_used") {
+        showResult("invalid", "❌", "QR già usato",
+          esc([d.name, d.university].filter(Boolean).join(" · ")) + (d.usedAt ? '<br>Usato il ' + esc(new Date(d.usedAt).toLocaleString("it-IT")) : ""));
+      } else if (d.reason === "wrong_event") {
+        showResult("invalid", "❌", "Evento sbagliato", "Questo biglietto è per: " + esc(d.eventName || "un altro evento"));
+      } else {
+        showResult("invalid", "❌", "QR non valido", "Biglietto non trovato: controlla il codice.");
+      }
+    } catch (e) {
+      showResult("invalid", "❌", "Errore di rete", "Riprova.");
+    }
+  }
+
+  async function handleScan(text){
+    var code = String(text || "").trim();
+    if (busy || !code) return;
+    busy = true;
+    await checkTicket(code);
+    setTimeout(function(){ busy = false; }, 1200);
+  }
+
+  // Numeri veri letti dal server (non un conteggio locale): registrati, entrati e incassato.
+  async function loadRoster(){
+    try {
+      var res = await fetch("/api/event-roster?event=" + encodeURIComponent(EVENT_SLUG), { headers: headers() });
+      if (res.status === 401) { onUnauthorized(); return false; }
+      if (!res.ok) return false;
+      rosterItems = (await res.json()).roster || [];
+      return true;
+    } catch (e) { return false; }
+  }
+  function renderStats(){
+    var inCount = rosterItems.filter(function(a){ return a.used; }).length;
+    var cash = rosterItems.reduce(function(n, a){ return n + (a.used ? (a.amountCents || 0) : 0); }, 0);
+    document.getElementById("statTotal").textContent = rosterItems.length;
+    document.getElementById("statIn").textContent = inCount;
+    document.getElementById("statCash").textContent = eur(cash);
+  }
+  function renderRoster(){
+    var box = document.getElementById("attendeesBox");
+    var q = document.getElementById("attendeesSearch").value.trim().toLowerCase();
+    var items = q ? rosterItems.filter(function(a){ return (a.name || "").toLowerCase().indexOf(q) !== -1 || (a.email || "").toLowerCase().indexOf(q) !== -1; }) : rosterItems;
+    if (!items.length) {
+      box.innerHTML = '<p class="attendees-empty">' + (rosterItems.length ? "Nessun nominativo trovato." : "Ancora nessuna registrazione.") + '</p>';
+      return;
+    }
+    box.innerHTML = items.map(function(a){
+      var state = a.used ? '<b>Entrato</b>' + (a.amountCents ? esc(eur(a.amountCents)) + ' pagati' : "")
+                         : '<b>Da incassare</b>' + esc(eur(a.dueCents || DOOR_CENTS));
+      return '<div class="attendee-row' + (a.used ? ' is-used' : '') + '">' +
+        '<input type="checkbox" aria-label="Check-in ' + esc(a.name || "") + '" data-code="' + esc(a.code) + '"' + (a.used ? ' checked disabled' : '') + '>' +
+        '<div class="who"><div class="n">' + esc(a.name || "—") + '</div><div class="t">' + esc(a.university || a.email || "—") + '</div></div>' +
+        '<div class="state">' + state + '</div></div>';
+    }).join("");
+    box.querySelectorAll('input[data-code]:not(:disabled)').forEach(function(cb){
+      cb.addEventListener("change", async function(){
+        if (!cb.checked) return;
+        cb.checked = false; // resta da incassare finché lo staff non conferma il pagamento
+        await checkTicket(cb.getAttribute("data-code"));
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+  }
+  async function refresh(){
+    if (await loadRoster()) { renderStats(); if (attendeesOpen) renderRoster(); }
+  }
+
+  document.getElementById("attendeesLink").addEventListener("click", function(){
+    attendeesOpen = !attendeesOpen;
+    document.getElementById("attendeesBox").classList.toggle("open", attendeesOpen);
+    document.getElementById("attendeesSearchWrap").classList.toggle("open", attendeesOpen);
+    if (attendeesOpen) { renderRoster(); refresh(); }
+  });
+  document.getElementById("attendeesSearch").addEventListener("input", renderRoster);
+
+  document.getElementById("exportLink").addEventListener("click", async function(){
+    try {
+      var res = await fetch("/api/export-attendees?event=" + encodeURIComponent(EVENT_SLUG), { headers: headers() });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) { alert("Export non riuscito, riprova."); return; }
+      var blob = await res.blob();
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "registrazioni-unitmilano.csv";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+    } catch (e) { alert("Errore di rete, riprova."); }
+  });
+
+  // Ingresso senza registrazione: crea al volo un biglietto già entrato e pagato (stessa
+  // /api/manual-checkin della vendita in loco GrowMi, bloccata sulla fascia unica di UnitMilano).
+  var walkinOverlay = document.getElementById("walkinOverlay");
+  var walkinError = document.getElementById("walkinError");
+  var walkinSubmit = document.getElementById("walkinSubmit");
+  document.getElementById("walkinBtn").addEventListener("click", function(){
+    ["walkinName", "walkinEmail", "walkinPhone"].forEach(function(id){ document.getElementById(id).value = ""; });
+    document.getElementById("walkinUni").value = "";
+    document.getElementById("walkinPrice").textContent = eur(DOOR_CENTS);
+    walkinError.hidden = true;
+    walkinOverlay.hidden = false;
+  });
+  document.getElementById("walkinCancel").addEventListener("click", function(){ walkinOverlay.hidden = true; });
+  walkinSubmit.addEventListener("click", async function(){
+    var name = document.getElementById("walkinName").value.trim();
+    var email = document.getElementById("walkinEmail").value.trim();
+    if (!name || !email) { walkinError.textContent = "Nome, cognome ed email sono obbligatori."; walkinError.hidden = false; return; }
+    walkinSubmit.disabled = true; walkinSubmit.textContent = "Registrazione...";
+    walkinError.hidden = true;
+    try {
+      var res = await fetch("/api/manual-checkin", {
+        method: "POST", headers: headers(true),
+        body: JSON.stringify({
+          eventSlug: EVENT_SLUG, tierId: "door", optionId: "plain", name: name, email: email,
+          phone: document.getElementById("walkinPhone").value.trim(), university: document.getElementById("walkinUni").value
+        })
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      var d = await res.json();
+      if (res.ok && d.ok) {
+        walkinOverlay.hidden = true;
+        refresh();
+        showResult("valid", "✅", "Ingresso registrato", esc(d.name || name) + '<br><strong>✓ Pagato ' + esc(eur(d.priceCents)) + '</strong>');
+      } else {
+        walkinError.textContent = d.error || "Qualcosa è andato storto."; walkinError.hidden = false;
+      }
+    } catch (e) {
+      walkinError.textContent = "Errore di rete, riprova."; walkinError.hidden = false;
+    } finally {
+      walkinSubmit.disabled = false; walkinSubmit.textContent = "Segna entrato + pagato";
+    }
+  });
+
+  document.getElementById("manualSubmit").addEventListener("click", function(){
+    var code = manualCode.value; manualCode.value = ""; handleScan(code);
+  });
+  manualCode.addEventListener("keydown", function(e){ if (e.key === "Enter") document.getElementById("manualSubmit").click(); });
+
+  function startScanner(){
+    if (scanner) return;
+    scanner = new Html5Qrcode("reader");
+    scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 240, height: 240 } },
+      function(text){ handleScan(text); }, function(){ /* errori per frame, ignorati */ }
+    ).catch(function(err){
+      document.getElementById("reader").innerHTML =
+        '<p style="padding:24px; text-align:center; color:rgba(238,243,255,0.62); font-size:13.5px;">Fotocamera non disponibile (' + esc(err) + '). Usa il codice a mano qui sotto.</p>';
+    });
+  }
+
+  function enter(){
+    keyGate.classList.add("hidden");
+    startScanner();
+    refresh();
+  }
+  document.getElementById("keySubmit").addEventListener("click", function(){
+    var k = keyInput.value.trim();
+    if (!k) return;
+    setKey(k);
+    enter();
+  });
+  keyInput.addEventListener("keydown", function(e){ if (e.key === "Enter") document.getElementById("keySubmit").click(); });
+  document.getElementById("changeKey").addEventListener("click", function(){
+    clearKey(); keyGate.classList.remove("hidden"); keyInput.value = ""; keyInput.focus();
+  });
+
+  if (getKey()) enter(); else keyInput.focus();
+  setInterval(function(){ if (getKey()) refresh(); }, 30000);
+})();
+</script>
+
+</body>
+</html>
