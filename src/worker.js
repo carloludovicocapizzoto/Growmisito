@@ -613,6 +613,31 @@ async function handleFetch(request, env, ctx) {
       }
     }
 
+    if (url.pathname === "/api/free-register" && request.method === "POST") {
+      const rl = await checkRateLimit(env, "RL_CHECKOUT", request, "free-register");
+      if (rl) return rl;
+      try {
+        return await handleFreeRegister(request, env);
+      } catch (err) {
+        console.log("Errore free-register:", err.stack || err.message);
+        return jsonResponse({ error: "Errore del server, riprova tra poco." }, 500);
+      }
+    }
+
+    // Pagina UnitMilano (statica, unitmilano.html): servita sotto /eventi/unitmilano. Non passa da
+    // finalizePublicHtmlResponse: ha una grafica tutta sua, non deve prendere tema/skin del sito.
+    if ((url.pathname === "/eventi/unitmilano" || url.pathname === "/eventi/unitmilano/") && request.method === "GET") {
+      const res = await env.ASSETS.fetch(new Request(new URL("/unitmilano", url.origin), request));
+      if (res.ok) {
+        const h = new Headers(res.headers);
+        h.set("Cache-Control", "no-cache");
+        return new Response(res.body, { status: 200, headers: h });
+      }
+    }
+    if ((url.pathname === "/staff/checkin" || url.pathname === "/staff/checkin/") && request.method === "GET") {
+      return Response.redirect(url.origin + "/staff-checkin", 302);
+    }
+
     if (url.pathname === "/api/register" && request.method === "POST") {
       const rl = await checkRateLimit(env, "RL_CHECKOUT", request, "ticket-register");
       if (rl) return rl;
@@ -1467,7 +1492,8 @@ async function handlePublicEvents(request, env) {
       heroImageUrl: mediaUrl(event.heroImageKey), coverImageUrl: mediaUrl(event.cardImageKey || event.coverImageKey),
       coverImagePosition: event.coverPosition || "center", coverImageZoom: event.coverZoom || 1,
       sortOrder: typeof event.sortOrder === "number" ? event.sortOrder : null,
-      pageUrl: `/evento/${slug}`
+      pageUrl: event.pagePath || `/evento/${slug}`,
+      priceNote: event.priceNote || ""
     });
   }
   return jsonResponse({ events });
@@ -1816,6 +1842,7 @@ async function handleEventPage(request, env) {
   if (!slug) return null;
   const event = await getEvent(env, slug);
   if (!event) return null;
+  if (event.pagePath && isEventPublished(event)) return Response.redirect(url.origin + event.pagePath, 302);
   if (!isEventPublished(event)) {
     // Bozza non pubblicata: normalmente 404, MA il pulsante "Preview pagina evento" del pannello
     // deve poterla vedere prima di pubblicarla — solo con sessione staff valida (mai a un
@@ -2001,7 +2028,7 @@ async function handleCheckin(request, env) {
 
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
 
-  const { code, eventSlug } = await request.json();
+  const { code, eventSlug, confirmPayment } = await request.json();
   const ticketCode = String(code || "").trim().toUpperCase();
   if (!ticketCode) {
     return jsonResponse({ error: "missing code" }, 400);
@@ -2015,7 +2042,7 @@ async function handleCheckin(request, env) {
 
   const ticket = JSON.parse(raw);
   if (ticket.used) {
-    return jsonResponse({ valid: false, reason: "already_used", usedAt: ticket.usedAt, email: ticket.email });
+    return jsonResponse({ valid: false, reason: "already_used", usedAt: ticket.usedAt, email: ticket.email, name: ticket.name, university: ticket.university || null });
   }
 
   // Scanner "bloccato" su un evento specifico (vedi selezione evento in staff-checkin.html): un
@@ -2025,8 +2052,25 @@ async function handleCheckin(request, env) {
     return jsonResponse({ valid: false, reason: "wrong_event", eventName: ticket.eventName });
   }
 
+  // Biglietto da registrazione gratuita (pagamento all'ingresso): la prima scansione NON lo segna
+  // come usato — mostra allo staff chi è e quanto incassare. Solo la conferma esplicita
+  // ("entrato + pagato", confirmPayment:true) lo marca used e fa entrare l'importo negli incassi.
+  const isDoorPayment = ticket.source === "registration" && ticket.paid !== true;
+  if (isDoorPayment && confirmPayment !== true) {
+    return jsonResponse({
+      valid: true, pendingPayment: true, code: ticketCode, name: ticket.name, email: ticket.email,
+      university: ticket.university || null, eventName: ticket.eventName, tierName: ticket.tierName,
+      amountDueCents: Number(ticket.doorPriceCents) || 0
+    });
+  }
+
   ticket.used = true;
   ticket.usedAt = new Date().toISOString();
+  if (isDoorPayment) {
+    ticket.paid = true;
+    ticket.paidAt = ticket.usedAt;
+    ticket.amountTotal = Number(ticket.doorPriceCents) || 0;
+  }
   // La metadata (used, nome, email, fascia, orario) oltre al campo dentro il JSON permette a
   // /api/stats e /api/attendees di leggere l'elenco di chi è entrato con un solo elenco delle
   // chiavi, senza dover leggere per intero ogni singolo biglietto uno per uno.
@@ -2049,6 +2093,7 @@ async function handleCheckin(request, env) {
 
   return jsonResponse({
     valid: true, email: ticket.email, name: ticket.name, eventName: ticket.eventName, tierName: ticket.tierName,
+    university: ticket.university || null, paid: isDoorPayment ? true : undefined, amountPaidCents: isDoorPayment ? ticket.amountTotal : undefined,
     stamps: stamps, reward3: stamps === 3, reward5: stamps === 5
   });
 }
@@ -2075,6 +2120,8 @@ async function handleAdminUndoCheckin(request, env) {
 
   ticket.used = false;
   ticket.usedAt = null;
+  // Un check-in con pagamento all'ingresso, annullato, torna "da incassare": l'importo esce dagli incassi.
+  if (ticket.source === "registration") { ticket.paid = false; ticket.paidAt = null; ticket.amountTotal = 0; }
   await env.TICKETS.put(kvKey, JSON.stringify(ticket), {
     // Stessa forma della metadata scritta alla creazione (prima di qualunque check-in) — niente
     // nome/email/fascia qui, coerente con come handleAttendees/handleEventRoster già gestiscono
@@ -2748,17 +2795,24 @@ function csvEscape(value) {
 }
 
 async function handleExportAttendees(request, env) {
-  const auth = await requireStaffAccount(request, env);
+  const auth = await requireStaffAccountOrKey(request, env);
   if (auth.error) return auth.error;
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
 
+  // ?event=<slug> facoltativo: solo i biglietti/registrazioni di quell'evento (es. lista UnitMilano
+  // per lo staff). Senza parametro resta l'export completo di sempre.
+  const onlyEvent = new URL(request.url).searchParams.get("event") || "";
   const tickets = [];
   let cursor = undefined;
   do {
     const page = await env.TICKETS.list({ prefix: "ticket:", cursor });
     for (const key of page.keys) {
+      if (onlyEvent && key.metadata?.eventSlug && key.metadata.eventSlug !== onlyEvent) continue;
       const raw = await env.TICKETS.get(key.name);
-      if (raw) tickets.push(JSON.parse(raw));
+      if (!raw) continue;
+      const t = JSON.parse(raw);
+      if (onlyEvent && t.eventSlug !== onlyEvent) continue;
+      tickets.push(t);
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
@@ -2783,31 +2837,35 @@ async function handleExportAttendees(request, env) {
 
   const rows = [[
     "Nome", "Email", "Telefono", "Evento", "Fascia", "Origine", "Data acquisto", "Entrato",
-    "Data check-in", "Account registrato", "Numero cliente", "Carta fisica riscattata", "Newsletter"
+    "Data check-in", "Account registrato", "Numero cliente", "Carta fisica riscattata", "Newsletter",
+    "Università", "Pagato", "Importo pagato (€)"
   ]];
 
   for (const t of tickets) {
     const account = t.email ? accountByEmail.get(t.email.toLowerCase()) : null;
     rows.push([
-      t.name, t.email, t.phone, t.eventName, t.tierName, t.source === "walkin" ? "In loco" : "Online",
+      t.name, t.email, t.phone, t.eventName, t.tierName, t.source === "walkin" ? "In loco" : (t.source === "registration" ? "Registrazione" : "Online"),
       t.createdAt ? new Date(t.createdAt).toLocaleString("it-IT") : "",
       t.used ? "Sì" : "No",
       t.usedAt ? new Date(t.usedAt).toLocaleString("it-IT") : "",
       account ? "Sì" : "No",
       account?.customerNumber || "",
       account?.physicalCardClaimed ? "Sì" : "No",
-      account?.newsletterOptin || t.newsletterOptin ? "Sì" : "No"
+      account?.newsletterOptin || t.newsletterOptin ? "Sì" : "No",
+      t.university || "",
+      t.source === "registration" ? (t.paid ? "Sì" : "No") : (Number(t.amountTotal) > 0 ? "Sì" : ""),
+      Number(t.amountTotal) > 0 ? (Number(t.amountTotal) / 100).toFixed(2).replace(".", ",") : ""
     ]);
   }
 
   // Persone registrate sul sito ma senza nessun biglietto — altrimenti non comparirebbero mai
   // nell'export, dato che sopra si parte sempre dai biglietti.
-  for (const account of accounts) {
+  for (const account of (onlyEvent ? [] : accounts)) {
     if (!account.email || emailsWithTickets.has(account.email.toLowerCase())) continue;
     rows.push([
       account.name, account.email, "", "", "", "", "", "No", "",
       "Sì", account.customerNumber || "", account.physicalCardClaimed ? "Sì" : "No",
-      account.newsletterOptin ? "Sì" : "No"
+      account.newsletterOptin ? "Sì" : "No", "", "", ""
     ]);
   }
 
@@ -2815,7 +2873,7 @@ async function handleExportAttendees(request, env) {
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="growmi-partecipanti.csv"'
+      "Content-Disposition": `attachment; filename="${onlyEvent ? "registrazioni-" + onlyEvent : "growmi-partecipanti"}.csv"`
     }
   });
 }
@@ -4660,6 +4718,226 @@ async function handleRegister(request, env) {
   return jsonResponse({ registrationId });
 }
 
+// ============================================================================
+// Registrazione gratuita con pagamento all'ingresso (UnitMilano e simili): nessun Stripe. Chi si
+// registra riceve un biglietto vero (stesso record "ticket:<CODICE>" e stesso QR di tutti gli
+// altri, source "registration", incasso 0 finché non paga) e lo staff lo scansiona con lo stesso
+// scanner di sempre: al check-in vede nome/università/importo da incassare e conferma
+// "entrato + pagato" — solo allora il biglietto diventa used e l'importo entra negli incassi.
+// ============================================================================
+const FREE_REG_UNIVERSITIES = ["Bocconi", "Statale", "Politecnico", "Cattolica", "Bicocca", "IULM", "NABA/IED", "Altro"];
+
+// PNG in scala di grigi del QR (niente canvas su Workers): le email non mostrano né SVG né
+// data-URI in modo affidabile (Gmail li scarta), un PNG allegato inline (content_id) sì.
+let CRC32_TABLE = null;
+function crc32(bytes) {
+  if (!CRC32_TABLE) {
+    CRC32_TABLE = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      CRC32_TABLE[n] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+async function qrPngBytes(text) {
+  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
+  const size = qr.modules.size, data = qr.modules.data;
+  const scale = 8, quiet = 4;
+  const dim = (size + quiet * 2) * scale;
+  const raw = new Uint8Array((dim + 1) * dim).fill(255);
+  for (let y = 0; y < dim; y++) raw[y * (dim + 1)] = 0; // filtro "none" a inizio riga
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      if (!data[row * size + col]) continue;
+      for (let dy = 0; dy < scale; dy++) {
+        const y = (row + quiet) * scale + dy;
+        const base = y * (dim + 1) + 1 + (col + quiet) * scale;
+        for (let dx = 0; dx < scale; dx++) raw[base + dx] = 0;
+      }
+    }
+  }
+  const idat = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer());
+  function chunk(type, body) {
+    const out = new Uint8Array(12 + body.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, body.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(body, 8);
+    dv.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
+    return out;
+  }
+  const ihdr = new Uint8Array(13);
+  const hv = new DataView(ihdr.buffer);
+  hv.setUint32(0, dim); hv.setUint32(4, dim);
+  ihdr[8] = 8; ihdr[9] = 0; // 8 bit, grayscale
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", new Uint8Array(0))];
+  const total = parts.reduce(function(n, a){ return n + a.length; }, 0);
+  const png = new Uint8Array(total);
+  let off = 0;
+  for (const a of parts) { png.set(a, off); off += a.length; }
+  return png;
+}
+
+function escapeHtmlText(v) {
+  return String(v == null ? "" : v).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; });
+}
+
+const FREE_REG_EMAIL_TEXT = {
+  it: {
+    subject: function(ev){ return `Sei registrato — ${ev}`; },
+    title: "Sei dentro!", hello: function(n){ return `Ciao ${n},`; },
+    lead: "la tua registrazione è confermata. Mostra questo QR code all'ingresso.",
+    when: "Quando", where: "Dove", formula: "Formula", code: "Codice",
+    formulaValue: "15 € all'ingresso · apericena + 1 drink inclusi",
+    reminders: ["Il QR è personale: non condividerlo.", "Porta un documento d'identità.", "Paghi 15 € all'ingresso, dopo la scansione del QR.", "Ingresso fino a esaurimento posti."],
+    remindersTitle: "Promemoria", bye: "A mercoledì! — UnitMilano"
+  },
+  en: {
+    subject: function(ev){ return `You're registered — ${ev}`; },
+    title: "You're in!", hello: function(n){ return `Hi ${n},`; },
+    lead: "your registration is confirmed. Show this QR code at the entrance.",
+    when: "When", where: "Where", formula: "Deal", code: "Code",
+    formulaValue: "€15 at the door · aperitivo dinner + 1 drink included",
+    reminders: ["The QR code is personal: don't share it.", "Bring a photo ID.", "You pay €15 at the door, after the QR scan.", "Entry until capacity is reached."],
+    remindersTitle: "Reminders", bye: "See you Wednesday! — UnitMilano"
+  }
+};
+
+function buildFreeRegistrationEmailHTML({ firstName, eventName, eventDate, eventLocation, ticketCode, lang }) {
+  const t = FREE_REG_EMAIL_TEXT[lang] || FREE_REG_EMAIL_TEXT.it;
+  const row = function(label, value) {
+    return `<tr><td style="padding:0 0 12px; font-size:13px; letter-spacing:1px; text-transform:uppercase; color:#8FB4FF; font-weight:bold;">${label}</td></tr>` +
+      `<tr><td style="padding:0 0 20px; font-size:19px; color:#FFFFFF; font-weight:bold; line-height:1.4;">${value}</td></tr>`;
+  };
+  return `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0A1A4D" style="background:#0A1A4D;">
+  <tr><td align="center" style="padding:28px 14px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#0F2A8A" style="background:#0F2A8A; border-radius:22px; max-width:600px;">
+      <tr><td style="padding:40px 36px; font-family:Arial, Helvetica, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center" style="font-size:34px; font-weight:900; color:#FDC631; letter-spacing:1px; padding-bottom:6px;">UNITMILANO</td></tr>
+          <tr><td align="center" style="font-size:15px; color:#C9D8FF; padding-bottom:26px;">${escapeHtmlText(eventName)}</td></tr>
+          <tr><td align="center" style="font-size:26px; font-weight:bold; color:#FFFFFF; padding-bottom:10px;">${t.title}</td></tr>
+          <tr><td align="center" style="font-size:17px; color:#E4ECFF; line-height:1.6; padding-bottom:24px;">${t.hello(escapeHtmlText(firstName))}<br>${t.lead}</td></tr>
+          <tr><td align="center" bgcolor="#FFFFFF" style="background:#FFFFFF; border-radius:16px; padding:18px;">
+            <img src="cid:qrcode" alt="QR code" width="230" height="230" style="display:block; border:0; margin:0 auto;">
+          </td></tr>
+          <tr><td align="center" style="font-size:15px; color:#C9D8FF; padding:12px 0 26px;">${t.code}: <strong style="color:#FDC631; letter-spacing:2px;">${ticketCode}</strong></td></tr>
+          <tr><td style="border-top:1px solid #3A55B8; font-size:1px; line-height:1px; padding-bottom:22px;">&nbsp;</td></tr>
+          ${row(t.when, escapeHtmlText(eventDate))}
+          ${row(t.where, escapeHtmlText(eventLocation))}
+          ${row(t.formula, t.formulaValue)}
+          <tr><td style="border-top:1px solid #3A55B8; font-size:1px; line-height:1px; padding-bottom:20px;">&nbsp;</td></tr>
+          <tr><td style="font-size:15px; font-weight:bold; color:#FDC631; padding-bottom:10px;">${t.remindersTitle}</td></tr>
+          ${t.reminders.map(function(r){ return `<tr><td style="font-size:15px; color:#E4ECFF; padding-bottom:6px; line-height:1.5;">&bull; ${r}</td></tr>`; }).join("")}
+          <tr><td align="center" style="font-size:15px; color:#C9D8FF; padding-top:22px;">${t.bye}</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>`;
+}
+
+async function handleFreeRegister(request, env) {
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const body = await request.json().catch(function(){ return {}; });
+  // Honeypot: un campo invisibile che un utente vero non compila mai — i bot sì. Risposta di
+  // finto successo, così non capiscono di essere stati scartati.
+  if (String(body.website || "").trim()) return jsonResponse({ ok: true });
+
+  const lang = body.lang === "en" ? "en" : "it";
+  const msg = function(it, en){ return lang === "en" ? en : it; };
+  const eventSlug = String(body.eventSlug || "");
+  const event = eventSlug ? await getEvent(env, eventSlug) : null;
+  if (!event || !isEventPublished(event) || event.freeRegistration !== true) {
+    return jsonResponse({ error: msg("Registrazioni non disponibili per questo evento.", "Registration is not available for this event.") }, 400);
+  }
+
+  const firstName = String(body.firstName || "").trim().slice(0, 80);
+  const lastName = String(body.lastName || "").trim().slice(0, 80);
+  const email = String(body.email || "").trim().toLowerCase().slice(0, 200);
+  const phone = String(body.phone || "").trim().slice(0, 30);
+  const university = String(body.university || "").trim();
+  if (!firstName || !lastName) return jsonResponse({ error: msg("Inserisci nome e cognome.", "Please enter your first and last name."), field: "name" }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ error: msg("Inserisci un'email valida.", "Please enter a valid email."), field: "email" }, 400);
+  if (!/^\+?[0-9 ()./-]{6,30}$/.test(phone) || phone.replace(/\D/g, "").length < 6) return jsonResponse({ error: msg("Inserisci un numero di telefono valido.", "Please enter a valid phone number."), field: "phone" }, 400);
+  if (!FREE_REG_UNIVERSITIES.includes(university)) return jsonResponse({ error: msg("Scegli la tua università.", "Please choose your university."), field: "university" }, 400);
+  if (body.privacy !== true || body.adult !== true) {
+    return jsonResponse({ error: msg("Per registrarti devi accettare la privacy e confermare di essere maggiorenne.", "To register you must accept the privacy policy and confirm you are 18 or over."), field: "consent" }, 400);
+  }
+
+  const dupKey = `freereg:${eventSlug}:${email}`;
+  if (await env.TICKETS.get(dupKey)) {
+    return jsonResponse({ error: msg("Questa email è già registrata per l'evento. Controlla la tua casella di posta (anche lo spam).", "This email is already registered for the event. Check your inbox (and spam)."), field: "email", duplicate: true }, 409);
+  }
+
+  const tier = (event.tiers && event.tiers[0]) || { id: "door", name: "Ingresso", capacity: 0, options: [{ id: "plain", label: "Ingresso" }] };
+  const option = (tier.options && tier.options[0]) || { id: "plain", label: "Ingresso" };
+  // Posti: stessa regola dei biglietti online (si contano tutti i ticket dell'evento, entrati o no).
+  let registered = 0;
+  let cursor = undefined;
+  do {
+    const page = await env.TICKETS.list({ prefix: "ticket:", cursor });
+    for (const key of page.keys) {
+      if (key.metadata?.eventSlug === eventSlug) registered++;
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  if (tier.capacity && registered >= tier.capacity) {
+    return jsonResponse({ error: msg("Posti esauriti: le registrazioni sono chiuse.", "Sold out: registrations are closed."), soldOut: true }, 409);
+  }
+
+  let ticketCode = generateTicketCode();
+  while (await env.TICKETS.get(`ticket:${ticketCode}`)) ticketCode = generateTicketCode();
+  const now = new Date().toISOString();
+  const fullName = `${firstName} ${lastName}`;
+  const doorPriceCents = Number(event.doorPriceCents) || 0;
+  const tierName = `${tier.name} — ${option.label}`;
+  const ticket = {
+    email, name: fullName, firstName, lastName, phone, university,
+    eventName: event.name, eventDate: event.dateDisplay, eventDateIso: event.dateIso, eventLocation: event.location,
+    tierName, eventSlug, tierId: tier.id, optionId: option.id,
+    termsAccepted: true, photoConsent: false, newsletterOptin: false, adultConfirmed: true,
+    amountTotal: 0, doorPriceCents, paid: false, currency: "eur",
+    used: false, createdAt: now, stripeSessionId: null, source: "registration", lang
+  };
+  await env.TICKETS.put(`ticket:${ticketCode}`, JSON.stringify(ticket), {
+    metadata: { used: false, eventSlug, tierId: tier.id, email, eventName: event.name, eventDateIso: event.dateIso, tierName, source: "registration" }
+  });
+  await env.TICKETS.put(dupKey, ticketCode);
+
+  const qrSvg = await QRCode.toString(ticketCode, { type: "svg", margin: 1, width: 320 });
+
+  let emailSent = false;
+  if (env.RESEND_API_KEY) {
+    try {
+      const png = await qrPngBytes(ticketCode);
+      const t = FREE_REG_EMAIL_TEXT[lang];
+      const resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "UnitMilano <noreply@growmi.it>",
+          to: email,
+          subject: t.subject(event.name),
+          html: buildFreeRegistrationEmailHTML({ firstName, eventName: event.name, eventDate: event.dateDisplay, eventLocation: event.location, ticketCode, lang }),
+          attachments: [{ filename: "qr-unitmilano.png", content: Buffer.from(png).toString("base64"), content_id: "qrcode" }]
+        })
+      });
+      emailSent = resendRes.ok;
+      if (!resendRes.ok) console.log("Resend free-register error:", resendRes.status, await resendRes.text());
+    } catch (e) {
+      console.log("Errore invio email registrazione:", e.message);
+    }
+  }
+
+  return jsonResponse({ ok: true, code: ticketCode, qrSvg, name: fullName, emailSent, eventName: event.name, eventDate: event.dateDisplay, eventLocation: event.location });
+}
+
 // Crea la sessione di pagamento Stripe incorporata nel sito (ui_mode "embedded" invece del
 // redirect a un Payment Link esterno). Prezzo e capacità si leggono SEMPRE dal registro
 // server-side (EVENTS), mai da quello che manda il client: evita sia di far pagare un prezzo
@@ -5779,7 +6057,7 @@ async function handleDashboardStats(request, env) {
       if (!raw) continue;
       const t = JSON.parse(raw);
       if (eventSlug && t.eventSlug !== eventSlug) continue;
-      const source = t.source === "walkin" ? "walkin" : "stripe";
+      const source = (t.source === "walkin" || t.source === "registration") ? "walkin" : "stripe";
       ticketsSold++;
       if (t.used) ticketsCheckedIn++;
       revenueCents += Number(t.amountTotal) || 0;
@@ -6083,6 +6361,14 @@ function validateEventPayload(body, existingTiers, sold) {
   const cardImageKey = String(body.cardImageKey || "").trim() || null;
   // Banda decorativa a tutta larghezza in fondo alla pagina evento (vedi footerBandBlock).
   const footerImageKey = String(body.footerImageKey || "").trim() || null;
+  // Pagina evento personalizzata (es. "/eventi/unitmilano"): se presente la card nell'elenco punta
+  // lì invece che a /evento/<slug>. Solo percorsi interni, mai URL esterni.
+  const pagePath = /^\/[a-z0-9][a-z0-9\/_-]*$/i.test(String(body.pagePath || "").trim()) ? String(body.pagePath).trim().slice(0, 120) : null;
+  // Registrazione gratuita con pagamento all'ingresso (nessun Stripe): i biglietti si creano dal
+  // form pubblico e l'incasso si registra al check-in dello staff — vedi handleFreeRegister.
+  const freeRegistration = body.freeRegistration === true;
+  const doorPriceCents = Number.isInteger(Number(body.doorPriceCents)) && Number(body.doorPriceCents) >= 0 ? Number(body.doorPriceCents) : 0;
+  const priceNote = String(body.priceNote || "").trim().slice(0, 80);
   const footerImageMobileKey = String(body.footerImageMobileKey || "").trim() || null;
   const coverPosition = String(body.coverPosition || "center").trim().slice(0, 30);
   const coverZoom = clampImageZoom(body.coverZoom);
@@ -6192,7 +6478,7 @@ function validateEventPayload(body, existingTiers, sold) {
     }
   }
 
-  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
+  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, pagePath, freeRegistration, doorPriceCents, priceNote, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
 }
 
 // image/gif incluso apposta per le newsletter: un GIF animato è l'unico modo che parte da solo e
@@ -6374,6 +6660,13 @@ async function handleAdminUpdateEvent(request, env) {
   const slug = String(body.slug || "").trim();
   const existing = slug ? await getEvent(env, slug) : null;
   if (!existing) return jsonResponse({ error: "evento non trovato" }, 404);
+
+  // Campi che il modulo del pannello non mostra (pagina personalizzata, registrazione gratuita con
+  // pagamento all'ingresso, nota prezzo per la card): se il payload non li porta restano quelli già
+  // salvati, altrimenti un semplice "Salva" dal pannello spegnerebbe la registrazione dell'evento.
+  ["pagePath", "freeRegistration", "doorPriceCents", "priceNote"].forEach(function(k){
+    if (!(k in body) && existing[k] !== undefined) body[k] = existing[k];
+  });
 
   const sold = await countSoldByTierOption(env, slug);
   const validated = validateEventPayload(body, existing.tiers, sold);
