@@ -2,6 +2,16 @@
    Le validazioni vere sono sul server (src/worker.js, handleFreeRegister): qui solo controlli di
    comodo per dare un messaggio chiaro prima dell'invio. */
 (function(){
+  // Header: pillola viola con link chiari finché si è in cima (sopra l'hero scuro), poi crema con link
+  // scuri — come sulle altre pagine con hero scuro (qui l'hero non è subito dopo <header>, quindi la
+  // logica di assets/i18n.js non scatta).
+  var siteHeader = document.querySelector('header');
+  if (siteHeader) {
+    var syncHeader = function(){ siteHeader.classList.toggle('at-top', window.scrollY < 12); };
+    syncHeader();
+    window.addEventListener('scroll', syncHeader, { passive: true });
+  }
+
   var EVENT_SLUG = 'unitmilano';
   var form = document.getElementById('um-form');
   if (!form) return;

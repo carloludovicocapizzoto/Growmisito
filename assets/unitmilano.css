@@ -18,6 +18,13 @@
   font-family:'Inter', system-ui, sans-serif;
 }
 .um-page [hidden]{ display:none !important; }
+/* Menu del sito: la pagina ha il testo chiaro (sfondo blu), quindi i link dell'header non devono
+   ereditarlo. Pillola chiara = link scuri; in cima alla pagina (header.at-top, pillola viola) = chiari. */
+.um-page header .navlinks a{ color:#1E0C2C; }
+.um-page header.at-top .navlinks a{ color:#FBF6F0; }
+.um-page header .nav-account{ color:#1E0C2C; }
+.um-page header.at-top .nav-account{ color:#FBF6F0; }
+.um-page header .navlinks.open a, .um-page header.at-top .navlinks.open a{ color:#1E0C2C; }
 .um-page main{ display:block; }
 
 /* ---------- Hero ---------- */
