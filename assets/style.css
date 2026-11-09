@@ -533,3 +533,7 @@ footer .wrap{ max-width:1600px; }
   .cookie-banner-inner{ padding:14px 16px; }
   .cookie-banner-ok{ width:100%; text-align:center; }
 }
+
+/* Testi con traduzione inglese scritti dal pannello (eventi): si mostra solo la lingua scelta */
+html:not([lang="en"]) .i18n-en{ display:none !important; }
+html[lang="en"] .i18n-it{ display:none !important; }

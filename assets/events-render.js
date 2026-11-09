@@ -30,8 +30,8 @@
     return (
       '<a class="ed-card reveal" href="' + ev.url + '">' +
         '<div class="ed-card-media' + mediaClass + '">' + mediaInner + '</div>' +
-        '<span class="tag">' + escapeHTML(ev.tag) + '</span>' +
-        '<h3>' + title + '</h3>' +
+        '<span class="tag">' + (ev.tagEn && ev.tagEn !== ev.tag ? '<span class="i18n-it">' + escapeHTML(ev.tag) + '</span><span class="i18n-en">' + escapeHTML(ev.tagEn) + '</span>' : escapeHTML(ev.tag)) + '</span>' +
+        '<h3>' + (ev.titleEn && ev.titleEn !== ev.title ? '<span class="i18n-it">' + title + '</span><span class="i18n-en">' + escapeHTML(ev.titleEn) + '</span>' : title) + '</h3>' +
         '<p class="meta">' + escapeHTML(ev.location) + '</p>' +
         (ev.priceNote ? '<p class="meta ed-card-price" style="color:#b8400f; font-weight:700;">' + escapeHTML(ev.priceNote) + '</p>' : '') +
         badge +
@@ -66,7 +66,7 @@
   // stesso shape {title, date, tag, location, url, cover, comingSoon} usato da cardHTML.
   function fromPublicEvent(ev){
     return {
-      title: ev.name, date: ev.dateIso, tag: ev.dateDisplay, location: ev.location,
+      title: ev.name, titleEn: ev.nameEn, date: ev.dateIso, tag: ev.dateDisplay, tagEn: ev.dateDisplayEn, location: ev.location,
       url: ev.pageUrl, cover: ev.coverImageUrl || ev.heroImageUrl || null, comingSoon: false,
       sortOrder: ev.sortOrder, coverPosition: ev.coverImagePosition, coverZoom: ev.coverImageZoom, priceNote: ev.priceNote
     };

@@ -1049,6 +1049,13 @@
             <button type="button" class="az-mini-btn" id="az-ev-add-feedback-option">+ Aggiungi opzione</button>
           </div>
 
+          <div>
+            <label class="az-u-label13">Versione inglese</label>
+            <p class="az-u-hint10">Chi sceglie l'inglese vede la traduzione di ogni testo qui sotto; dove lasci vuoto resta l'italiano. Premi "Aggiorna l'elenco" dopo aver scritto o modificato i testi della pagina (date, descrizione, fasce, sezioni extra): compaiono tutti, scrivi l'inglese accanto a ciascuno. Nomi propri e orari si possono lasciare vuoti.</p>
+            <button type="button" class="az-mini-btn" id="az-ev-tr-refresh">Aggiorna l'elenco dei testi</button>
+            <div id="az-ev-tr-list" style="margin-top:12px; display:grid; gap:10px;"></div>
+          </div>
+
           <p class="az-group-label">Pubblicazione</p>
           <label style="display:flex; align-items:center; gap:10px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px; cursor:pointer;">
             <input type="checkbox" id="az-ev-published" style="width:18px; height:18px;">
@@ -3631,6 +3638,7 @@
   var evCardKey = null;
   var evFooterKey = null;
   var evSocialKey = null;
+  var evTranslations = {};
   var evFooterMobileKey = null;
   var evCoverFraming = { position: 'center', zoom: 1 };
   var evGallery = [];
@@ -3796,6 +3804,62 @@
     try { await fetch('/api/admin/delete-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: evFooterMobileKey }) }); } catch (e) {}
     evFooterMobileKey = null;
     renderFooterMobilePreview();
+  });
+  // Versione inglese: evTranslations = { testo italiano: english } — le righe nel DOM sono solo la
+  // vista, vengono rilette in evTranslations prima di ogni rigenerazione e prima del salvataggio.
+  function syncTranslationsFromDom(){
+    document.querySelectorAll('#az-ev-tr-list [data-it]').forEach(function(inp){
+      var it = inp.getAttribute('data-it');
+      var en = inp.value.trim();
+      if (en) evTranslations[it] = en; else delete evTranslations[it];
+    });
+  }
+  function renderTranslationRows(strings){
+    var list = document.getElementById('az-ev-tr-list');
+    list.innerHTML = '';
+    strings.forEach(function(it){
+      var row = document.createElement('div');
+      var label = document.createElement('div');
+      label.style.cssText = 'font-size:12px; color:#6E6478; margin-bottom:3px; white-space:pre-wrap; word-break:break-word;';
+      label.textContent = it;
+      var inp = document.createElement('textarea');
+      inp.rows = it.length > 80 ? 3 : 1;
+      inp.setAttribute('data-it', it);
+      inp.placeholder = 'English';
+      inp.style.cssText = 'width:100%; padding:8px 10px; border:1px solid #d8d0e2; border-radius:8px; font:inherit; font-size:13px;';
+      inp.value = evTranslations[it] || '';
+      row.appendChild(label);
+      row.appendChild(inp);
+      list.appendChild(row);
+    });
+  }
+  function collectEventStrings(p){
+    var out = [], seen = {};
+    function add(t){
+      t = (t || '').trim();
+      if (!t || seen[t] || /^[\d\s:.,–—\-\/]+$/.test(t)) return;
+      seen[t] = 1; out.push(t);
+    }
+    add(p.dateDisplay); add(p.teaser);
+    (p.tiers || []).forEach(function(t){ add(t.name); add(t.sub); (t.options || []).forEach(function(o){ add(o.label); }); });
+    (p.contentBlocks || []).forEach(function(b){
+      if (b.type === 'heading') add(b.text);
+      else if (b.type === 'text') add(b.html);
+      else if (b.type === 'lineup') { add(b.role); add(b.name); add(b.time); add(b.desc); }
+      else if (b.type === 'button') add(b.label);
+    });
+    return out;
+  }
+  document.getElementById('az-ev-tr-refresh').addEventListener('click', function(){
+    var msg = document.getElementById('az-event-msg');
+    var payload = buildEventFormPayload(msg);
+    if (!payload) return;
+    syncTranslationsFromDom();
+    var strings = collectEventStrings(payload);
+    var kept = {};
+    strings.forEach(function(it){ if (evTranslations[it]) kept[it] = evTranslations[it]; });
+    evTranslations = kept;
+    renderTranslationRows(strings);
   });
   function renderSocialPreview(){
     document.getElementById('az-ev-social-preview').innerHTML = imagePreviewHTML(evSocialKey);
@@ -6429,6 +6493,8 @@
     renderFooterPreview();
     evSocialKey = event ? (event.socialImageKey || null) : null;
     renderSocialPreview();
+    evTranslations = event && event.translationsEn ? Object.assign({}, event.translationsEn) : {};
+    renderTranslationRows(Object.keys(evTranslations));
     evFooterMobileKey = event ? (event.footerImageMobileKey || null) : null;
     renderFooterMobilePreview();
     evCoverFraming = { position: (event && event.coverPosition) || 'center', zoom: (event && event.coverZoom) || 1 };
@@ -6538,6 +6604,7 @@
       cardImageKey: evCardKey,
       footerImageKey: evFooterKey,
       socialImageKey: evSocialKey,
+      translationsEn: (syncTranslationsFromDom(), evTranslations),
       footerImageMobileKey: evFooterMobileKey,
       coverPosition: evCoverFraming.position,
       coverZoom: evCoverFraming.zoom,

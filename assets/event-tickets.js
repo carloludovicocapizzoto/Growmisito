@@ -43,6 +43,14 @@
   // growmiApplyLang() in assets/i18n.js. Aggiunge comunque data-i18n sull'elemento creato, così
   // un cambio lingua DOPO che i biglietti sono già stati disegnati li aggiorna lo stesso, senza
   // dover ridisegnare la lista.
+  // Testo scritto dal pannello con la sua traduzione inglese (se esiste): entrambe nel DOM, il CSS
+  // (.i18n-it/.i18n-en in style.css) mostra quella della lingua scelta, anche se si cambia lingua dopo.
+  function et_dual(it, en){
+    return (en && en !== it) ? '<span class="i18n-it">' + it + '</span><span class="i18n-en">' + en + '</span>' : it;
+  }
+  function et_pick(it, en){
+    return ((document.documentElement.getAttribute("lang") || "it") === "en" && en) ? en : it;
+  }
   function et_t(key, fallback){
     var lang = document.documentElement.getAttribute("lang") || "it";
     var dict = (typeof GROWMI_I18N !== "undefined" && GROWMI_I18N[lang]) || {};
@@ -140,19 +148,20 @@
           row.className = "et-tier-row";
           optionsHtml = tier.options.map(function(o){
             return '<button type="button" class="et-tier-btn" data-tier="' + tier.id + '" data-option="' + o.id + '" data-selection-label="' +
-              (tier.name + " — " + o.label).replace(/"/g, "&quot;") + '" data-price="' + o.priceCents + '" data-fee="' + o.feeCents + '" data-gross="' + o.grossCents + '">' +
-              '<span class="et-tier-btn-label">' + o.label + '</span><span class="et-tier-btn-price">' + euro(o.priceCents) + '</span>' +
+              (tier.name + " — " + o.label).replace(/"/g, "&quot;") + '" data-selection-label-en="' +
+              ((tier.nameEn || tier.name) + " — " + (o.labelEn || o.label)).replace(/"/g, "&quot;") + '" data-price="' + o.priceCents + '" data-fee="' + o.feeCents + '" data-gross="' + o.grossCents + '">' +
+              '<span class="et-tier-btn-label">' + et_dual(o.label, o.labelEn) + '</span><span class="et-tier-btn-price">' + euro(o.priceCents) + '</span>' +
             '</button>';
           }).join("");
         }
         row.innerHTML =
-          '<div class="et-tier-name">' + tier.name + (tier.sub ? '<small>' + tier.sub + '</small>' : '') + '</div>' +
+          '<div class="et-tier-name">' + et_dual(tier.name, tier.nameEn) + (tier.sub ? '<small>' + et_dual(tier.sub, tier.subEn) + '</small>' : '') + '</div>' +
           '<div class="et-tier-options">' + optionsHtml + '</div>';
         tierList.appendChild(row);
       });
       tierList.querySelectorAll(".et-tier-btn:not(:disabled)").forEach(function(btn){
         btn.addEventListener("click", function(){
-          selectTier(btn.dataset.tier, btn.dataset.option, btn.dataset.selectionLabel, {
+          selectTier(btn.dataset.tier, btn.dataset.option, et_pick(btn.dataset.selectionLabel, btn.dataset.selectionLabelEn), {
             price: parseInt(btn.dataset.price, 10),
             fee: parseInt(btn.dataset.fee, 10),
             gross: parseInt(btn.dataset.gross, 10)
