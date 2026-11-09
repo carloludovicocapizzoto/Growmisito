@@ -5036,6 +5036,33 @@ async function handleFreeRegister(request, env) {
     }
   }
 
+  // Avviso interno allo staff a ogni registrazione (stesso indirizzo degli altri avvisi del sito). Mai
+  // bloccante: se fallisce la registrazione è già valida e la persona ha il suo QR.
+  if (env.RESEND_API_KEY) {
+    try {
+      const total = registered + 1;
+      const capacityNote = tier.capacity ? ` / ${tier.capacity}` : "";
+      const alertRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "UnitMilano <noreply@growmi.it>",
+          to: "grow.mi@outlook.it",
+          reply_to: email,
+          subject: `Nuova registrazione ${event.name} — ${fullName} (n. ${total})`,
+          html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+            `<p><strong>Nuova registrazione per ${escapeHtmlText(event.name)}</strong> — ${total}${capacityNote} registrati</p>` +
+            `<p>${escapeHtmlText(fullName)}<br>${escapeHtmlText(email)}<br>${escapeHtmlText(phone)}<br>Università: ${escapeHtmlText(university)}<br>Codice: ${ticketCode}</p>` +
+            `<p style="color:#6E6478; font-size:13px;">Lingua: ${lang === "en" ? "inglese" : "italiano"} · email con QR ${emailSent ? "inviata" : "NON inviata (il QR è visibile in pagina)"}</p>` +
+            `</div>`
+        })
+      });
+      if (!alertRes.ok) console.log("Resend alert free-register error:", alertRes.status, await alertRes.text());
+    } catch (e) {
+      console.log("Errore avviso registrazione allo staff:", e.message);
+    }
+  }
+
   return jsonResponse({ ok: true, code: ticketCode, qrSvg, name: fullName, emailSent, eventName: event.name, eventDate: event.dateDisplay, eventLocation: event.location });
 }
 
