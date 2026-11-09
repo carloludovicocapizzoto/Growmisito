@@ -1750,17 +1750,17 @@ ${isPast ? "" : `
 <section class="ed-section-tight" id="biglietti" style="background:${event.ticketBgColor || "var(--purple-deep)"}; color:var(--cream);">
   <div class="wrap">
     <div class="ed-head">
-      <p class="ed-eyebrow">Biglietti</p>
-      <h2>Prendi il tuo posto</h2>
+      <p class="ed-eyebrow" data-i18n="ev1_tickets_eyebrow">Biglietti</p>
+      <h2 data-i18n="ev1_tickets_title">Prendi il tuo posto</h2>
     </div>
     <div class="event-tickets" data-event="${slug}">
       <div class="et-tier-list" data-et-tier-list></div>
       <div class="et-reg-step" data-et-reg-step hidden>
-        <p class="et-reg-step-selection">Hai scelto: <strong data-et-selection-label></strong></p>
+        <p class="et-reg-step-selection"><span data-i18n="et_chosen">Hai scelto:</span> <strong data-et-selection-label></strong></p>
         <form class="et-reg-form" data-et-reg-form>
           <div class="et-form-row">
-            <input type="text" data-et-firstname placeholder="Nome" required>
-            <input type="text" data-et-lastname placeholder="Cognome" required>
+            <input type="text" data-et-firstname placeholder="Nome" data-i18n-placeholder="et_ph_firstname" required>
+            <input type="text" data-et-lastname placeholder="Cognome" data-i18n-placeholder="et_ph_lastname" required>
           </div>
           <div class="et-form-row">
             <select data-et-phone-prefix>
@@ -1775,19 +1775,19 @@ ${isPast ? "" : `
           </div>
           <input type="email" data-et-email placeholder="Email" required>
           <div class="et-guests" data-et-guests></div>
-          <button type="button" class="et-add-guest" data-et-add-guest>+ Aggiungi un altro biglietto</button>
+          <button type="button" class="et-add-guest" data-et-add-guest data-i18n="et_add_guest">+ Aggiungi un altro biglietto</button>
           <p class="et-total" data-et-total></p>
-          <label><input type="checkbox" data-et-terms required> Accetto termini e condizioni</label>
-          <label><input type="checkbox" data-et-photo-consent required> Accetto il trattamento immagini</label>
-          <label><input type="checkbox" data-et-newsletter> Iscrivimi alla newsletter</label>
-          <input type="text" data-et-coupon placeholder="Codice coupon (facoltativo)" style="text-transform:uppercase;">
-          <button type="submit" class="btn coral" data-et-reg-submit>Vai al pagamento</button>
+          <label><input type="checkbox" data-et-terms required> <span data-i18n="et_terms">Accetto termini e condizioni</span></label>
+          <label><input type="checkbox" data-et-photo-consent required> <span data-i18n="et_photo">Accetto il trattamento immagini</span></label>
+          <label><input type="checkbox" data-et-newsletter> <span data-i18n="et_newsletter">Iscrivimi alla newsletter</span></label>
+          <input type="text" data-et-coupon placeholder="Codice coupon (facoltativo)" data-i18n-placeholder="et_ph_coupon" style="text-transform:uppercase;">
+          <button type="submit" class="btn coral" data-et-reg-submit data-i18n="et_pay">Vai al pagamento</button>
           <p class="et-reg-status" data-et-reg-status hidden></p>
         </form>
       </div>
       <div class="et-checkout-wrap" data-et-checkout-wrap hidden>
         <p class="et-price-breakdown" data-et-checkout-breakdown></p>
-        <p class="et-checkout-note">Il prezzo include l'ingresso all'evento nella fascia e opzione scelte. La commissione di transazione copre i costi di elaborazione sicura del pagamento ed è già conteggiata nel totale qui sopra.</p>
+        <p class="et-checkout-note" data-i18n="et_checkout_note">Il prezzo include l'ingresso all'evento nella fascia e opzione scelte. La commissione di transazione copre i costi di elaborazione sicura del pagamento ed è già conteggiata nel totale qui sopra.</p>
         ${event.checkoutNote ? `<p class="et-checkout-note">${event.checkoutNote}</p>` : ""}
         <div data-et-checkout-container></div>
       </div>

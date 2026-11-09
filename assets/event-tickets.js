@@ -89,13 +89,13 @@
       if (addGuestBtn) addGuestBtn.hidden = n >= MAX_TICKETS;
       if (!totalEl) return;
       if (!selectedPriceInfo || n < 2) { totalEl.textContent = ""; return; }
-      totalEl.textContent = n + " biglietti × " + euro(selectedPriceInfo.gross) + " = " + euro(selectedPriceInfo.gross * n) + " (commissione di transazione inclusa)";
+      totalEl.textContent = n + " " + et_t("et_tickets_word", "biglietti") + " × " + euro(selectedPriceInfo.gross) + " = " + euro(selectedPriceInfo.gross * n) + " (" + et_t("et_fee_incl", "commissione di transazione inclusa") + ")";
     }
 
     function renumberGuests(){
       if (!guestsWrap) return;
       guestsWrap.querySelectorAll("[data-et-guest]").forEach(function(g, i){
-        g.querySelector("[data-et-guest-title]").textContent = "Biglietto " + (i + 2);
+        g.querySelector("[data-et-guest-title]").textContent = et_t("et_ticket_word", "Biglietto") + " " + (i + 2);
       });
     }
 
@@ -106,7 +106,7 @@
       g.setAttribute("data-et-guest", "");
       g.innerHTML =
         '<div class="et-guest-head"><span data-et-guest-title></span><button type="button" class="et-guest-remove" aria-label="Rimuovi questo biglietto">×</button></div>' +
-        '<div class="et-form-row"><input type="text" data-g-firstname placeholder="Nome" required><input type="text" data-g-lastname placeholder="Cognome" required></div>' +
+        '<div class="et-form-row"><input type="text" data-g-firstname placeholder="' + et_t("et_ph_firstname", "Nome") + '" required><input type="text" data-g-lastname placeholder="' + et_t("et_ph_lastname", "Cognome") + '" required></div>' +
         '<input type="email" data-g-email placeholder="Email" required>';
       g.querySelector(".et-guest-remove").addEventListener("click", function(){
         g.remove(); renumberGuests(); updateTotals();
@@ -184,7 +184,7 @@
       var wrap = document.createElement("div");
       wrap.className = "et-waitlist-form";
       wrap.innerHTML =
-        '<input type="text" placeholder="Nome" class="et-waitlist-name" required>' +
+        '<input type="text" placeholder="' + et_t("et_ph_firstname", "Nome") + '" class="et-waitlist-name" required>' +
         '<input type="email" placeholder="Email" class="et-waitlist-email" required>' +
         '<button type="button" class="et-waitlist-submit">' + et_t("et_waitlist_submit", "Iscrivimi") + '</button>' +
         '<p class="et-waitlist-status" hidden></p>';
@@ -194,7 +194,7 @@
         var nameVal = wrap.querySelector(".et-waitlist-name").value.trim();
         var emailVal = wrap.querySelector(".et-waitlist-email").value.trim();
         if (!nameVal || !emailVal) {
-          statusEl.textContent = et_t("et_waitlist_error", "Compila nome ed email.");
+          statusEl.textContent = et_t("et_waitlist_fill", "Compila nome ed email.");
           statusEl.hidden = false;
           return;
         }
@@ -240,7 +240,7 @@
       if (checkoutBreakdown && selectedPriceInfo) {
         var n = ticketCount();
         checkoutBreakdown.textContent = selectedPriceInfo.fee > 0
-          ? (n > 1 ? n + " × (" : "") + "Biglietto " + euro(selectedPriceInfo.price) + " + commissione transazione " + euro(selectedPriceInfo.fee) + (n > 1 ? ")" : "") + " = " + euro(selectedPriceInfo.gross * n)
+          ? (n > 1 ? n + " × (" : "") + et_t("et_ticket_word", "Biglietto") + " " + euro(selectedPriceInfo.price) + " + " + et_t("et_fee_word", "commissione transazione") + " " + euro(selectedPriceInfo.fee) + (n > 1 ? ")" : "") + " = " + euro(selectedPriceInfo.gross * n)
           : "";
       }
       checkoutWrap.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -253,17 +253,17 @@
         var data = await res.json();
         if (!res.ok) {
           checkoutContainer.textContent = data.error === "fascia esaurita"
-            ? "Questa fascia si è appena esaurita — aggiorna la pagina e scegli quella successiva."
+            ? et_t("et_err_soldout", "Questa fascia si è appena esaurita — aggiorna la pagina e scegli quella successiva.")
             : data.error === "posti insufficienti"
-              ? "In questa fascia restano solo " + data.remaining + " posti: aggiorna la pagina e riduci i biglietti."
-              : "Qualcosa è andato storto, riprova.";
+              ? et_t("et_err_remaining", "In questa fascia restano solo {n} posti: aggiorna la pagina e riduci i biglietti.").replace("{n}", data.remaining)
+              : et_t("et_err_generic", "Qualcosa è andato storto, riprova.");
           return;
         }
         var stripe = window.Stripe(STRIPE_PUBLISHABLE_KEY);
         var checkout = await stripe.initEmbeddedCheckout({ clientSecret: data.clientSecret });
         checkout.mount(checkoutContainer);
       } catch (e) {
-        checkoutContainer.textContent = "Errore di connessione, riprova.";
+        checkoutContainer.textContent = et_t("et_err_conn", "Errore di connessione, riprova.");
       }
     }
 
@@ -295,7 +295,7 @@
         });
         var data = await res.json();
         if (!res.ok) {
-          status.textContent = data.error || "Controlla i dati inseriti.";
+          status.textContent = data.error || et_t("et_err_check", "Controlla i dati inseriti.");
           status.classList.add("is-error");
           status.hidden = false;
           submitBtn.disabled = false;
@@ -304,7 +304,7 @@
         form.hidden = true;
         await startCheckout(data.registrationId);
       } catch (e) {
-        status.textContent = "Errore di connessione, riprova.";
+        status.textContent = et_t("et_err_conn", "Errore di connessione, riprova.");
         status.classList.add("is-error");
         status.hidden = false;
         submitBtn.disabled = false;
