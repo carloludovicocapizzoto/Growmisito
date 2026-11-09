@@ -28,6 +28,11 @@ export default {
       } catch (err) {
         console.log("Errore cron backup:", err.stack || err.message);
       }
+      try {
+        await sendFreeRegistrationDigest(env);
+      } catch (err) {
+        console.log("Errore cron riepilogo registrazioni:", err.stack || err.message);
+      }
     }
     if (event.cron === "*/15 * * * *") {
       try {
@@ -1497,6 +1502,8 @@ async function handlePublicEvents(request, env) {
     events.push({
       slug, name: event.name, dateDisplay: event.dateDisplay, dateIso: event.dateIso,
       location: event.location, teaser: event.teaser || "",
+      nameEn: (event.translationsEn || {})[String(event.name || "").trim()] || null,
+      dateDisplayEn: (event.translationsEn || {})[String(event.dateDisplay || "").trim()] || null,
       heroImageUrl: mediaUrl(event.heroImageKey), coverImageUrl: mediaUrl(event.cardImageKey || event.coverImageKey),
       coverImagePosition: event.coverPosition || "center", coverImageZoom: event.coverZoom || 1,
       sortOrder: typeof event.sortOrder === "number" ? event.sortOrder : null,
@@ -1505,6 +1512,17 @@ async function handlePublicEvents(request, env) {
     });
   }
   return jsonResponse({ events });
+}
+
+// Versione inglese dei testi scritti dal pannello (titoli, scaletta, fasce...): l'evento ha
+// translationsEn = { "testo italiano": "english text" }. Dove esiste una traduzione si scrivono
+// entrambe le lingue e il CSS (.i18n-it / .i18n-en in style.css) mostra quella della lingua scelta;
+// dove manca resta il testo italiano, come prima.
+function eventTr(event, it, tag) {
+  const text = String(it == null ? "" : it);
+  const en = event && event.translationsEn && event.translationsEn[text.trim()];
+  if (!en || !text) return text;
+  return `<${tag} class="i18n-it">${text}</${tag}><${tag} class="i18n-en">${en}</${tag}>`;
 }
 
 // Header/nav/footer/newsletter-popup identici a quelli già in ogni pagina statica (vedi
@@ -1604,18 +1622,18 @@ function eventPageHTML(event, slug) {
         lineupBuffer.push(
           `<div class="ed-lineup-card">` +
             (b.photoKey ? `<div class="ed-lineup-photo"><img src="${mediaUrl(b.photoKey)}" alt="${b.name}" loading="lazy"></div>` : "") +
-            (b.role ? `<span class="role"${b.roleColor ? ` style="color:${b.roleColor};"` : ""}>${b.role}</span>` : "") +
-            `<h3>${b.name}</h3>` +
-            (b.time ? `<span class="time"${b.timeColor ? ` style="color:${b.timeColor};"` : ""}>${b.time}</span>` : "") +
-            (b.desc ? `<p>${b.desc}</p>` : "") +
+            (b.role ? `<span class="role"${b.roleColor ? ` style="color:${b.roleColor};"` : ""}>${eventTr(event, b.role, "span")}</span>` : "") +
+            `<h3>${eventTr(event, b.name, "span")}</h3>` +
+            (b.time ? `<span class="time"${b.timeColor ? ` style="color:${b.timeColor};"` : ""}>${eventTr(event, b.time, "span")}</span>` : "") +
+            (b.desc ? `<p>${eventTr(event, b.desc, "span")}</p>` : "") +
           `</div>`
         );
       } else {
         flushLineup();
-        if (b.type === "heading") html += `<div class="ed-head"><h2${b.color ? ` style="color:${b.color};"` : ""}>${b.text}</h2></div>`;
-        else if (b.type === "text") html += `<div class="ed-block-text"${b.color ? ` style="color:${b.color};"` : ""}>${b.html}</div>`;
+        if (b.type === "heading") html += `<div class="ed-head"><h2${b.color ? ` style="color:${b.color};"` : ""}>${eventTr(event, b.text, "span")}</h2></div>`;
+        else if (b.type === "text") html += `<div class="ed-block-text"${b.color ? ` style="color:${b.color};"` : ""}>${eventTr(event, b.html, "div")}</div>`;
         else if (b.type === "image") html += `<img src="${mediaUrl(b.key)}" alt="" style="width:${b.width}%; display:block; margin:0 auto 28px; border-radius:14px;">`;
-        else if (b.type === "button") html += `<p style="text-align:center; margin:28px 0;"><a class="btn coral" href="${b.url}"${b.color ? ` style="background:${b.color}; border-color:${b.color};"` : ""}>${b.label}</a></p>`;
+        else if (b.type === "button") html += `<p style="text-align:center; margin:28px 0;"><a class="btn coral" href="${b.url}"${b.color ? ` style="background:${b.color}; border-color:${b.color};"` : ""}>${eventTr(event, b.label, "span")}</a></p>`;
         else if (b.type === "divider") html += `<hr class="ed-block-divider">`;
         else if (b.type === "spacer") html += `<div style="height:${b.height}px;"></div>`;
       }
@@ -1702,8 +1720,8 @@ ${darkTheme ? `
     ${advisoryBadge}
     <span class="ed-dark-eyebrow" data-i18n="ev1_eyebrow">GrowMi presenta</span>
     <h1 class="ed-dark-title">${event.name}</h1>
-    <p class="ed-dark-sub">${event.dateDisplay} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline; text-underline-offset:3px;">${event.location}</a></p>
-    ${event.teaser ? `<p class="ed-dark-lead">${event.teaser}</p>` : ""}
+    <p class="ed-dark-sub">${eventTr(event, event.dateDisplay, "span")} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline; text-underline-offset:3px;">${event.location}</a></p>
+    ${event.teaser ? `<p class="ed-dark-lead">${eventTr(event, event.teaser, "span")}</p>` : ""}
     <div class="ed-dark-actions">
       ${isPast ? "" : `<a class="btn coral" href="#biglietti" data-i18n="ev1_cta_tickets">Vedi i biglietti</a>`}
       <a class="btn outline on-dark" href="/eventi.html" data-i18n="ev1_cta_back">Tutti gli eventi</a>
@@ -1715,9 +1733,9 @@ ${infobar}
 <section class="ed-hero" style="padding:110px 0 80px;">
   ${heroImg}
   <div class="wrap ed-wrap">
-    <p class="ed-eyebrow">${event.dateDisplay} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline; text-underline-offset:3px;">${event.location}</a></p>
+    <p class="ed-eyebrow">${eventTr(event, event.dateDisplay, "span")} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline; text-underline-offset:3px;">${event.location}</a></p>
     <h1 style="font-size:clamp(40px,7vw,96px);">${event.name}</h1>
-    ${event.teaser ? `<p class="ed-lead">${event.teaser}</p>` : ""}
+    ${event.teaser ? `<p class="ed-lead">${eventTr(event, event.teaser, "span")}</p>` : ""}
   </div>
 </section>
 `}
@@ -3466,6 +3484,7 @@ async function handleEventTiers(request, env) {
   } while (cursor);
 
   let activeAssigned = false;
+  const enDict = event.translationsEn || {};
   // Calcolate in ordine (non con .map indipendente) perché lo stato "cascade" di una fascia deve
   // poter guardare il soldOut già calcolato della fascia precedente nell'array.
   const soldOutById = {};
@@ -3514,9 +3533,15 @@ async function handleEventTiers(request, env) {
     // della fascia è attiva (es. "Solo ingresso" già prezzato, "+ Birra e panzerotto" ancora no).
     const options = t.options.filter(function(o){ return o.priceCents !== null && o.priceCents !== undefined; }).map(function(o){
       const fee = addStripeFee(o.priceCents);
-      return { id: o.id, label: o.label, priceCents: o.priceCents, feeCents: fee.feeCents, grossCents: fee.grossCents };
+      const o2 = { id: o.id, label: o.label, priceCents: o.priceCents, feeCents: fee.feeCents, grossCents: fee.grossCents };
+      const labelEn = enDict[String(o.label || "").trim()];
+      if (labelEn) o2.labelEn = labelEn;
+      return o2;
     });
-    tiers.push({ id: t.id, name: t.name, sub: t.sub, options, soldOut, active });
+    const tier2 = { id: t.id, name: t.name, sub: t.sub, options, soldOut, active };
+    if (enDict[String(t.name || "").trim()]) tier2.nameEn = enDict[String(t.name).trim()];
+    if (t.sub && enDict[String(t.sub).trim()]) tier2.subEn = enDict[String(t.sub).trim()];
+    tiers.push(tier2);
   }
 
   return jsonResponse({ eventName: event.name, tiers, allSoldOut: !activeAssigned, feedbackOptions: event.feedbackOptions || [] });
@@ -4943,6 +4968,78 @@ function buildFreeRegistrationEmailHTML({ firstName, eventName, eventDate, event
 </table>`;
 }
 
+// Riepilogo giornaliero delle nuove registrazioni (eventi con registrazione gratuita, es. UnitMilano):
+// una sola email al giorno allo staff invece di una per iscritto, così non pesa sul limite
+// giornaliero di Resend. Parte col cron delle 10:00 UTC (vedi scheduled()). Non scrive nulla se non
+// ci sono nuove registrazioni; l'orario dell'ultimo riepilogo è in KV (freereg-digest:<slug>) e si
+// aggiorna solo dopo un invio riuscito. Smette da solo il giorno dopo l'evento.
+async function sendFreeRegistrationDigest(env) {
+  if (!env.TICKETS || !env.RESEND_API_KEY) return;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const yesterdayIso = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const slugs = await listAllEventSlugs(env);
+  for (const slug of slugs) {
+    const event = await getEvent(env, slug);
+    if (!event || event.freeRegistration !== true || !isEventPublished(event)) continue;
+    if (event.dateIso && event.dateIso < yesterdayIso) continue;
+
+    const lastKey = `freereg-digest:${slug}`;
+    const last = await env.TICKETS.get(lastKey);
+    const sinceMs = last ? Date.parse(last) || 0 : 0;
+    const nowIso = new Date().toISOString();
+
+    let total = 0, entered = 0;
+    const fresh = [];
+    let cursor = undefined;
+    do {
+      const page = await env.TICKETS.list({ prefix: "ticket:", cursor });
+      for (const key of page.keys) {
+        if (key.metadata?.eventSlug !== slug) continue;
+        total++;
+        if (key.metadata?.used) entered++;
+        if (key.metadata?.source !== "registration") continue;
+        const raw = await env.TICKETS.get(key.name);
+        if (!raw) continue;
+        const t = JSON.parse(raw);
+        if ((Date.parse(t.createdAt) || 0) > sinceMs) fresh.push(t);
+      }
+      cursor = page.list_complete ? undefined : page.cursor;
+    } while (cursor);
+    if (!fresh.length) continue;
+    fresh.sort(function(a, b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
+
+    const capacity = (event.tiers && event.tiers[0] && event.tiers[0].capacity) || 0;
+    const rows = fresh.map(function(t){
+      const when = new Date(t.createdAt).toLocaleString("it-IT", { timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      return `<tr>` +
+        `<td style="padding:6px 10px; border-bottom:1px solid #eee;">${escapeHtmlText(t.name)}</td>` +
+        `<td style="padding:6px 10px; border-bottom:1px solid #eee;">${escapeHtmlText(t.university || "")}</td>` +
+        `<td style="padding:6px 10px; border-bottom:1px solid #eee;">${escapeHtmlText(t.email)}</td>` +
+        `<td style="padding:6px 10px; border-bottom:1px solid #eee;">${escapeHtmlText(t.phone || "")}</td>` +
+        `<td style="padding:6px 10px; border-bottom:1px solid #eee; color:#6E6478;">${escapeHtmlText(when)}</td></tr>`;
+    }).join("");
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "UnitMilano <noreply@growmi.it>",
+        to: "grow.mi@outlook.it",
+        subject: `${event.name}: ${fresh.length} ${fresh.length === 1 ? "nuova registrazione" : "nuove registrazioni"} (totale ${total}${capacity ? " / " + capacity : ""})`,
+        html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+          `<p><strong>Riepilogo registrazioni ${escapeHtmlText(event.name)}</strong></p>` +
+          `<p>Nuove dall'ultimo riepilogo: <strong>${fresh.length}</strong><br>Totale registrati: <strong>${total}${capacity ? " su " + capacity + " posti" : ""}</strong><br>Già entrati: ${entered}</p>` +
+          `<table style="border-collapse:collapse; font-size:14px;"><thead><tr>` +
+          `<th align="left" style="padding:6px 10px; border-bottom:2px solid #1E0C2C;">Nome</th><th align="left" style="padding:6px 10px; border-bottom:2px solid #1E0C2C;">Università</th>` +
+          `<th align="left" style="padding:6px 10px; border-bottom:2px solid #1E0C2C;">Email</th><th align="left" style="padding:6px 10px; border-bottom:2px solid #1E0C2C;">Telefono</th>` +
+          `<th align="left" style="padding:6px 10px; border-bottom:2px solid #1E0C2C;">Quando</th></tr></thead><tbody>${rows}</tbody></table>` +
+          `</div>`
+      })
+    });
+    if (res.ok) await env.TICKETS.put(lastKey, nowIso);
+    else console.log("Resend riepilogo registrazioni error:", res.status, await res.text());
+  }
+}
+
 async function handleFreeRegister(request, env) {
   if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
   const body = await request.json().catch(function(){ return {}; });
@@ -5033,33 +5130,6 @@ async function handleFreeRegister(request, env) {
       if (!resendRes.ok) console.log("Resend free-register error:", resendRes.status, await resendRes.text());
     } catch (e) {
       console.log("Errore invio email registrazione:", e.message);
-    }
-  }
-
-  // Avviso interno allo staff a ogni registrazione (stesso indirizzo degli altri avvisi del sito). Mai
-  // bloccante: se fallisce la registrazione è già valida e la persona ha il suo QR.
-  if (env.RESEND_API_KEY) {
-    try {
-      const total = registered + 1;
-      const capacityNote = tier.capacity ? ` / ${tier.capacity}` : "";
-      const alertRes = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from: "UnitMilano <noreply@growmi.it>",
-          to: "grow.mi@outlook.it",
-          reply_to: email,
-          subject: `Nuova registrazione ${event.name} — ${fullName} (n. ${total})`,
-          html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
-            `<p><strong>Nuova registrazione per ${escapeHtmlText(event.name)}</strong> — ${total}${capacityNote} registrati</p>` +
-            `<p>${escapeHtmlText(fullName)}<br>${escapeHtmlText(email)}<br>${escapeHtmlText(phone)}<br>Università: ${escapeHtmlText(university)}<br>Codice: ${ticketCode}</p>` +
-            `<p style="color:#6E6478; font-size:13px;">Lingua: ${lang === "en" ? "inglese" : "italiano"} · email con QR ${emailSent ? "inviata" : "NON inviata (il QR è visibile in pagina)"}</p>` +
-            `</div>`
-        })
-      });
-      if (!alertRes.ok) console.log("Resend alert free-register error:", alertRes.status, await alertRes.text());
-    } catch (e) {
-      console.log("Errore avviso registrazione allo staff:", e.message);
     }
   }
 
@@ -6492,6 +6562,15 @@ function validateEventPayload(body, existingTiers, sold) {
   // Immagine per l'anteprima quando si condivide il link (WhatsApp, Instagram...): formato
   // consigliato 1200×630. Vuota = ricade su locandina, card o hero (vedi eventPageHTML).
   const socialImageKey = String(body.socialImageKey || "").trim() || null;
+  // Traduzioni inglesi dei testi dell'evento: { "testo italiano": "english text" } (vedi eventTr).
+  const translationsEn = {};
+  if (body.translationsEn && typeof body.translationsEn === "object" && !Array.isArray(body.translationsEn)) {
+    for (const [k, v] of Object.entries(body.translationsEn)) {
+      const key = String(k).trim().slice(0, 3000);
+      const val = String(v == null ? "" : v).trim().slice(0, 3000);
+      if (key && val && Object.keys(translationsEn).length < 300) translationsEn[key] = val;
+    }
+  }
   // Pagina evento personalizzata (es. "/eventi/unitmilano"): se presente la card nell'elenco punta
   // lì invece che a /evento/<slug>. Solo percorsi interni, mai URL esterni.
   const pagePath = /^\/[a-z0-9][a-z0-9\/_-]*$/i.test(String(body.pagePath || "").trim()) ? String(body.pagePath).trim().slice(0, 120) : null;
@@ -6609,7 +6688,7 @@ function validateEventPayload(body, existingTiers, sold) {
     }
   }
 
-  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, socialImageKey, pagePath, freeRegistration, doorPriceCents, priceNote, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
+  return { ok: true, event: { name, dateDisplay, dateIso, location, teaser, tiers, feedbackOptions, heroImageKey, heroPosition, heroZoom, coverImageKey, cardImageKey, footerImageKey, footerImageMobileKey, socialImageKey, translationsEn, pagePath, freeRegistration, doorPriceCents, priceNote, gallery, published, sortOrder, darkTheme, advisoryLabel, advisorySub, doorsTime, dressCode, accentColor, accentColor2, bgColor, leadColor, ticketBgColor, textureDots, textureStripes, contentBlocks, coverPosition, coverZoom, checkoutNote, sponsorLogos, sponsorDisplay, sponsorLogoSize } };
 }
 
 // image/gif incluso apposta per le newsletter: un GIF animato è l'unico modo che parte da solo e
