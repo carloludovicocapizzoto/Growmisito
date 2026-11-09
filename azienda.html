@@ -1878,13 +1878,16 @@
         : '—';
       tr.innerHTML =
         '<td>' + esc(a.name || '—') + '</td>' +
-        '<td>' + esc(a.email) + '</td>' +
+        '<td>' + esc(a.email) + (a.code ? ' <button type="button" class="az-mini-btn" data-fix-email="' + esc(a.code) + '" title="Correggi email">✏️ Correggi</button>' : '') + '</td>' +
         '<td>' + esc(a.tierName || '—') + '</td>' +
         '<td>' + time + '</td>' +
         '<td>' + tipo + '</td>' +
         '<td>' + origine + '</td>' +
         '<td>' + stato + '</td>';
       tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll('[data-fix-email]').forEach(function(btn){
+      btn.addEventListener('click', function(){ fixTicketEmail(btn, slug); });
     });
     tbody.querySelectorAll('[data-toggle-code]').forEach(function(sel){
       sel.addEventListener('change', async function(){
@@ -1918,6 +1921,41 @@
         }
       });
     });
+  }
+  // Correzione email di un biglietto (il cliente ha sbagliato a scriverla all'acquisto): il server
+  // sposta il biglietto sulla email giusta e, se non è ancora entrato, ne emette uno con codice
+  // nuovo (il vecchio QR smette di funzionare) e lo rimanda a quell'indirizzo.
+  async function fixTicketEmail(btn, slug){
+    var code = btn.getAttribute('data-fix-email');
+    var roster = rosterCache[slug] || [];
+    var item = roster.filter(function(r){ return r.code === code; })[0];
+    if (!item) return;
+    var next = prompt('Nuova email per ' + (item.name || 'questo biglietto') + ':', item.email || '');
+    if (next === null) return;
+    next = next.trim();
+    if (!next || next.toLowerCase() === String(item.email || '').toLowerCase()) return;
+    var msg = item.used
+      ? 'Il biglietto è già stato usato: cambio solo l\'email nel record, senza rimandare nulla.\n\nNuova email: ' + next + '\nConfermi?'
+      : 'Sposto il biglietto di ' + (item.name || '') + ' su ' + next + '.\nGli arriva una nuova mail con QR e PDF e il vecchio QR smette di funzionare.\n\nConfermi?';
+    if (!confirm(msg)) return;
+    btn.disabled = true;
+    try {
+      var res = await fetch('/api/admin/ticket-fix-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code, email: next })
+      });
+      var data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Errore sconosciuto.');
+      item.email = data.newEmail;
+      if (data.newCode) item.code = data.newCode;
+      applyAttendeesFilter();
+      alert(data.reissued
+        ? (data.sent ? 'Fatto: il biglietto è passato a ' + data.newEmail + ' e la mail con il QR è partita.' : 'Biglietto spostato su ' + data.newEmail + ', ma la mail NON è partita (' + (data.sendError || 'errore') + '). Il nuovo codice è ' + data.newCode + '.')
+        : 'Fatto: email aggiornata.');
+    } catch (err) {
+      alert('Errore: ' + err.message);
+      btn.disabled = false;
+    }
   }
   async function loadRoster(slug){
     if (rosterCache[slug]) return rosterCache[slug];
