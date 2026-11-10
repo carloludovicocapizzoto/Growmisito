@@ -245,6 +245,14 @@ async function handleFetch(request, env, ctx) {
       }
     }
 
+    if (url.pathname === "/api/admin/promo-coupons") {
+      try {
+        return await handleAdminPromoCoupons(request, env);
+      } catch (err) {
+        console.log("Errore admin/promo-coupons:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
     if (url.pathname === "/api/admin/ticket-fix-email" && request.method === "POST") {
       try {
         return await handleAdminTicketFixEmail(request, env);
@@ -2172,6 +2180,63 @@ async function handleAdminUndoCheckin(request, env) {
   });
 
   return jsonResponse({ ok: true });
+}
+
+// Codici sconto promozionali in percentuale (es. uno per artista): GET elenca con gli usi, POST
+// crea o aggiorna { code, percentOff, label, eventSlug, expiresAt } senza azzerare gli usi, DELETE
+// ?code=... li toglie. Si applicano al checkout (vedi validateCoupon / handleCreateCheckoutSession).
+async function handleAdminPromoCoupons(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+
+  if (request.method === "GET") {
+    const coupons = [];
+    let cursor = undefined;
+    do {
+      const page = await env.TICKETS.list({ prefix: "coupon:", cursor });
+      for (const key of page.keys) {
+        const raw = await env.TICKETS.get(key.name);
+        const c = raw ? JSON.parse(raw) : null;
+        if (c && c.type === "percent") coupons.push({ code: key.name.slice("coupon:".length), percentOff: c.percentOff, label: c.label || "", eventSlug: c.eventSlug || null, expiresAt: c.expiresAt || null, uses: c.uses || 0, usedBy: c.usedBy || [] });
+      }
+      cursor = page.list_complete ? undefined : page.cursor;
+    } while (cursor);
+    return jsonResponse({ coupons });
+  }
+
+  if (request.method === "POST") {
+    const body = await request.json().catch(function(){ return {}; });
+    const code = String(body.code || "").trim().toUpperCase();
+    const percentOff = Number(body.percentOff);
+    if (!/^[A-Z0-9-]{3,30}$/.test(code)) return jsonResponse({ error: "codice non valido (3-30 lettere, numeri o trattini)" }, 400);
+    if (!Number.isFinite(percentOff) || percentOff <= 0 || percentOff > 100) return jsonResponse({ error: "percentuale non valida" }, 400);
+    const eventSlug = String(body.eventSlug || "").trim() || null;
+    if (eventSlug && !await getEvent(env, eventSlug)) return jsonResponse({ error: "evento non trovato" }, 400);
+    const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+    if (expiresAt && isNaN(expiresAt.getTime())) return jsonResponse({ error: "scadenza non valida" }, 400);
+    const existingRaw = await env.TICKETS.get(`coupon:${code}`);
+    const existing = existingRaw ? JSON.parse(existingRaw) : null;
+    if (existing && existing.type !== "percent") return jsonResponse({ error: "esiste già un codice con questo nome" }, 409);
+    const coupon = Object.assign({}, existing || {}, {
+      type: "percent", percentOff, label: String(body.label || "").trim().slice(0, 100),
+      eventSlug, expiresAt: expiresAt ? expiresAt.toISOString() : null,
+      createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+      uses: (existing && existing.uses) || 0, usedBy: (existing && existing.usedBy) || []
+    });
+    await env.TICKETS.put(`coupon:${code}`, JSON.stringify(coupon));
+    return jsonResponse({ ok: true, code, percentOff, eventSlug, expiresAt: coupon.expiresAt });
+  }
+
+  if (request.method === "DELETE") {
+    const code = String(new URL(request.url).searchParams.get("code") || "").trim().toUpperCase();
+    if (!code) return jsonResponse({ error: "codice mancante" }, 400);
+    const raw = await env.TICKETS.get(`coupon:${code}`);
+    if (!raw || JSON.parse(raw).type !== "percent") return jsonResponse({ error: "codice non trovato" }, 404);
+    await env.TICKETS.delete(`coupon:${code}`);
+    return jsonResponse({ ok: true });
+  }
+  return jsonResponse({ error: "metodo non supportato" }, 405);
 }
 
 // Correzione manuale dell'indirizzo di un biglietto (il cliente ha scritto male l'email
@@ -4690,10 +4755,18 @@ async function handleNewsletterTrackClick(request, env) {
 // è già stato usato, ed è effettivamente di quella persona (mai fidarsi solo del codice — senza
 // il controllo email chiunque intercetti un codice altrui potrebbe usarlo). Usata sia da
 // handleRegister (al submit del form) sia da handleValidateCoupon (validazione live in pagina).
-async function validateCoupon(env, code, email) {
+async function validateCoupon(env, code, email, eventSlug) {
   const raw = await env.TICKETS.get(`coupon:${code}`);
   if (!raw) return { valid: false, error: "coupon non valido" };
   const coupon = JSON.parse(raw);
+  // Codici sconto promozionali (es. quelli degli artisti): percentuale sul prezzo, riutilizzabili da
+  // chiunque, non legati a un'email e (se indicato) a un solo evento. Il conteggio degli usi si
+  // aggiorna dal webhook, a pagamento completato.
+  if (coupon.type === "percent") {
+    if (coupon.eventSlug && eventSlug && coupon.eventSlug !== eventSlug) return { valid: false, error: "questo codice non vale per questo evento" };
+    if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) return { valid: false, error: "codice scaduto" };
+    return { valid: true, coupon };
+  }
   if (coupon.email.toLowerCase() !== String(email || "").trim().toLowerCase()) {
     return { valid: false, error: "questo coupon non è associato a questa email" };
   }
@@ -4825,7 +4898,7 @@ async function handleRegister(request, env) {
   // Il coupon è facoltativo: se il campo è vuoto si procede normalmente. Se è compilato, deve
   // essere valido — meglio bloccare qui con un errore chiaro che scoprirlo al checkout.
   if (couponCode) {
-    const check = await validateCoupon(env, couponCode, email);
+    const check = await validateCoupon(env, couponCode, email, eventSlug);
     if (!check.valid) return jsonResponse({ error: check.error }, 400);
   }
 
@@ -5188,20 +5261,29 @@ async function handleCreateCheckoutSession(request, env) {
   // (nel mezzo qualcun altro potrebbe averlo già usato, o potrebbe essere scaduto proprio ora).
   let priceCents = found.option.priceCents;
   let couponApplied = null;
+  let percentOff = 0;
   if (registration.couponCode) {
-    const check = await validateCoupon(env, registration.couponCode, registration.email);
+    const check = await validateCoupon(env, registration.couponCode, registration.email, registration.eventSlug);
     if (!check.valid) return jsonResponse({ error: "coupon non più valido: " + check.error }, 400);
-    priceCents = 0;
     couponApplied = registration.couponCode;
+    if (check.coupon.type === "percent") {
+      // Sconto percentuale sul prezzo netto (poi si aggiunge la commissione Stripe come sempre),
+      // valido per tutti i biglietti dell'acquisto, ospiti compresi.
+      percentOff = Math.min(100, Math.max(0, Number(check.coupon.percentOff) || 0));
+      priceCents = Math.round(found.option.priceCents * (100 - percentOff) / 100);
+    } else {
+      priceCents = 0;
+    }
   }
 
   // La maggiorazione commissione Stripe si applica qui, all'ultimo momento prima di addebitare:
   // cosi' l'importo pagato è sempre coerente con quello mostrato sul sito (stessa addStripeFee()
   // usata da handleEventTiers) e un coupon (priceCents 0) non genera mai nessuna commissione.
-  const { grossCents } = addStripeFee(priceCents);
+  const { grossCents, feeCents: buyerFeeCents } = addStripeFee(priceCents);
   // Gli ospiti pagano il prezzo pieno (con la stessa commissione di sempre, calcolata per
-  // biglietto): il coupon vale solo per il biglietto di chi compra, mai per gli altri.
-  const guestGrossCents = addStripeFee(found.option.priceCents).grossCents;
+  // biglietto): il coupon "5° evento gratis" vale solo per il biglietto di chi compra. Un codice
+  // sconto percentuale invece vale per tutti i biglietti dell'acquisto.
+  const guestGrossCents = percentOff ? grossCents : addStripeFee(found.option.priceCents).grossCents;
 
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const origin = new URL(request.url).origin;
@@ -5211,13 +5293,13 @@ async function handleCreateCheckoutSession(request, env) {
     price_data: {
       currency: "eur",
       unit_amount: grossCents,
-      product_data: { name: productName + (couponApplied ? " (coupon 5° evento)" : "") }
+      product_data: { name: productName + (percentOff ? ` (codice ${couponApplied} −${percentOff}%)` : couponApplied ? " (coupon 5° evento)" : "") }
     }
   }];
   if (guests.length) {
     lineItems.push({
       quantity: guests.length,
-      price_data: { currency: "eur", unit_amount: guestGrossCents, product_data: { name: productName } }
+      price_data: { currency: "eur", unit_amount: guestGrossCents, product_data: { name: productName + (percentOff ? ` (codice ${couponApplied} −${percentOff}%)` : "") } }
     });
   }
 
@@ -5243,7 +5325,9 @@ async function handleCreateCheckoutSession(request, env) {
     return_url: `${origin}/biglietto-confermato?session_id={CHECKOUT_SESSION_ID}`
   });
 
-  return jsonResponse({ clientSecret: session.client_secret });
+  const response = { clientSecret: session.client_secret };
+  if (percentOff) Object.assign(response, { discountPercent: percentOff, netCents: priceCents, feeCents: buyerFeeCents, grossCents });
+  return jsonResponse(response);
 }
 
 // Contributo fisso per la commissione opera dal vivo — se in futuro cambia importo o artista,
@@ -5479,9 +5563,15 @@ async function handleStripeWebhook(request, env) {
         const couponRaw = await env.TICKETS.get(`coupon:${couponCode}`);
         if (couponRaw) {
           const coupon = JSON.parse(couponRaw);
-          coupon.used = true;
-          coupon.usedAt = new Date().toISOString();
-          coupon.usedForTicketCode = ticketCode;
+          if (coupon.type === "percent") {
+            // Codice promozionale riutilizzabile: non si "spende", si conta chi l'ha usato.
+            coupon.uses = (coupon.uses || 0) + issued.length;
+            coupon.usedBy = (coupon.usedBy || []).concat([{ email, ticketCode, tickets: issued.length, at: new Date().toISOString() }]).slice(-300);
+          } else {
+            coupon.used = true;
+            coupon.usedAt = new Date().toISOString();
+            coupon.usedForTicketCode = ticketCode;
+          }
           await env.TICKETS.put(`coupon:${couponCode}`, JSON.stringify(coupon));
         }
       }

@@ -251,6 +251,10 @@
           body: JSON.stringify({ registrationId: registrationId, tierId: selectedTierId, optionId: selectedOptionId })
         });
         var data = await res.json();
+        if (res.ok && data.discountPercent && checkoutBreakdown) {
+          var nd = ticketCount();
+          checkoutBreakdown.textContent = (nd > 1 ? nd + " × (" : "") + et_t("et_ticket_word", "Biglietto") + " " + euro(data.netCents) + " (−" + data.discountPercent + "%) + " + et_t("et_fee_word", "commissione transazione") + " " + euro(data.feeCents) + (nd > 1 ? ")" : "") + " = " + euro(data.grossCents * nd);
+        }
         if (!res.ok) {
           checkoutContainer.textContent = data.error === "fascia esaurita"
             ? et_t("et_err_soldout", "Questa fascia si è appena esaurita — aggiorna la pagina e scegli quella successiva.")
