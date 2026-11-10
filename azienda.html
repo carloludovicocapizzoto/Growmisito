@@ -492,6 +492,7 @@
         <button type="button" class="az-nav-item" data-panel="presenti">👥 Presenti</button>
         <button type="button" class="az-nav-item" data-panel="newsletter">📧 Newsletter</button>
         <button type="button" class="az-nav-item" data-panel="messaggi">📬 Messaggi</button>
+        <button type="button" class="az-nav-item" data-panel="codici">🏷️ Codici sconto</button>
       </div>
       <div class="az-nav-group">
         <p class="az-nav-group-label">Contenuti</p>
@@ -627,6 +628,35 @@
       <p class="az-msg" id="az-msgs-msg" hidden></p>
       <div id="az-msgs-list"></div>
       <p class="az-empty" id="az-msgs-empty" hidden>Nessun messaggio.</p>
+    </div>
+
+    <!-- Codici sconto -->
+    <div class="az-panel" data-panel-content="codici" hidden>
+      <p class="az-u-hint10" style="max-width:640px; margin-bottom:16px;">Codici sconto in percentuale, riutilizzabili da chiunque (es. uno per ogni artista che porta amici). Lo sconto è sul prezzo del biglietto, poi si aggiunge la commissione Stripe come sempre, e vale per tutti i biglietti dello stesso acquisto. Chi lo usa lo scrive nel campo "Codice coupon" prima di pagare.</p>
+      <p class="az-msg" id="az-promo-msg" hidden></p>
+      <div id="az-promo-list"></div>
+      <p class="az-empty" id="az-promo-empty" hidden>Nessun codice sconto ancora.</p>
+
+      <form id="az-promo-form" style="border:1.5px solid var(--line); border-radius:14px; background:#fff; padding:18px; margin-top:18px; max-width:640px; display:grid; gap:12px;">
+        <p class="az-group-label" id="az-promo-form-title" style="margin:0;">Nuovo codice</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr 110px; gap:12px;">
+          <div class="az-field"><label for="az-promo-code">Codice</label><input type="text" id="az-promo-code" placeholder="es. ENEA20" maxlength="30" style="text-transform:uppercase;" required></div>
+          <div class="az-field"><label for="az-promo-label">Per chi è</label><input type="text" id="az-promo-label" placeholder="es. nome artista" maxlength="100"></div>
+          <div class="az-field"><label for="az-promo-percent">Sconto %</label><input type="number" id="az-promo-percent" min="1" max="100" value="20" required></div>
+        </div>
+        <div class="az-field"><label for="az-promo-event">Evento</label><select id="az-promo-event"><option value="">Tutti gli eventi</option></select></div>
+        <div id="az-promo-tiers-wrap" hidden>
+          <label class="az-u-label13">Fasce a cui si applica</label>
+          <p class="az-u-hint10">Se non ne spunti nessuna, vale per tutte le fasce dell'evento.</p>
+          <div id="az-promo-tiers" style="display:flex; gap:16px; flex-wrap:wrap;"></div>
+        </div>
+        <div class="az-field"><label for="az-promo-expires">Scadenza (facoltativa)</label><input type="datetime-local" id="az-promo-expires"></div>
+        <p class="az-msg" id="az-promo-form-msg" hidden></p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button type="submit" class="az-submit" style="width:auto; padding:10px 22px;">Salva codice</button>
+          <button type="button" class="az-mini-btn" id="az-promo-cancel" hidden>Annulla modifica</button>
+        </div>
+      </form>
     </div>
 
     <!-- Newsletter -->
@@ -2084,6 +2114,134 @@
     } catch (err) { showMsg(msgEl, 'Errore di connessione.', true); }
   }
   panelLoaders.messaggi = { loaded: false, load: loadContactMsgs };
+
+  // ---- Codici sconto (percentuali, riutilizzabili) ----
+  var promoCoupons = [], promoEvents = [];
+  function fmtPromoDate(iso){
+    return iso ? new Date(iso).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'nessuna scadenza';
+  }
+  function promoEventOf(slug){ return promoEvents.filter(function(e){ return e.slug === slug; })[0]; }
+  function renderPromoCoupons(){
+    var list = promoCoupons.slice().sort(function(a, b){ return a.code.localeCompare(b.code); });
+    document.getElementById('az-promo-empty').hidden = list.length > 0;
+    document.getElementById('az-promo-list').innerHTML = list.map(function(c){
+      var ev = c.eventSlug ? promoEventOf(c.eventSlug) : null;
+      var tiers = (c.tierIds && c.tierIds.length && ev)
+        ? c.tierIds.map(function(id){ var t = (ev.tiers || []).filter(function(x){ return x.id === id; })[0]; return t ? t.name : id; }).join(', ')
+        : 'tutte le fasce';
+      var usedBy = (c.usedBy || []).slice().reverse();
+      var usedHtml = usedBy.length
+        ? '<details style="margin-top:10px;"><summary style="cursor:pointer; font-size:13px;">Chi l\'ha usato (' + usedBy.length + ' acquisti)</summary><div style="margin-top:8px; font-size:13px; line-height:1.7;">' +
+            usedBy.map(function(u){ return esc(u.email) + ' — ' + (u.tickets || 1) + ' bigl. — ' + esc(fmtMsgDate(u.at)); }).join('<br>') + '</div></details>'
+        : '';
+      return '<div class="az-card" data-promo-code="' + esc(c.code) + '" style="border:1.5px solid var(--line); border-radius:14px; background:#fff; padding:16px 18px; margin-bottom:12px; max-width:640px;">' +
+        '<div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">' +
+          '<div><strong style="font-size:18px; letter-spacing:.04em;">' + esc(c.code) + '</strong> <span style="background:#EFE7DC; border-radius:99px; padding:2px 10px; font-size:12px; font-weight:700; margin-left:6px;">−' + esc(c.percentOff) + '%</span>' +
+            (c.label ? '<br><span style="font-size:13px; color:var(--grey);">' + esc(c.label) + '</span>' : '') + '</div>' +
+          '<div style="text-align:right;"><div style="font-size:26px; font-weight:800; line-height:1;">' + (c.uses || 0) + '</div><div style="font-size:12px; color:var(--grey);">biglietti venduti</div></div>' +
+        '</div>' +
+        '<p style="font-size:13px; color:var(--grey); margin:10px 0 0;">' + esc(ev ? ev.name : (c.eventSlug || 'Tutti gli eventi')) + ' · ' + esc(tiers) + ' · scade: ' + esc(fmtPromoDate(c.expiresAt)) + '</p>' +
+        usedHtml +
+        '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">' +
+          '<button type="button" class="az-mini-btn" data-promo-copy>📋 Copia codice</button>' +
+          '<button type="button" class="az-mini-btn" data-promo-edit>✏️ Modifica</button>' +
+          '<button type="button" class="az-mini-btn" data-promo-delete style="color:#B4400F;">🗑 Elimina</button>' +
+        '</div></div>';
+    }).join('');
+  }
+  function renderPromoTierChecks(selected){
+    var slug = document.getElementById('az-promo-event').value;
+    var ev = slug ? promoEventOf(slug) : null;
+    var wrap = document.getElementById('az-promo-tiers-wrap');
+    wrap.hidden = !ev;
+    document.getElementById('az-promo-tiers').innerHTML = ev ? (ev.tiers || []).map(function(t){
+      return '<label style="display:flex; align-items:center; gap:6px; font-size:14px;"><input type="checkbox" value="' + esc(t.id) + '"' + ((selected || []).indexOf(t.id) !== -1 ? ' checked' : '') + '> ' + esc(t.name) + '</label>';
+    }).join('') : '';
+  }
+  function resetPromoForm(){
+    document.getElementById('az-promo-form-title').textContent = 'Nuovo codice';
+    document.getElementById('az-promo-code').value = '';
+    document.getElementById('az-promo-code').readOnly = false;
+    document.getElementById('az-promo-label').value = '';
+    document.getElementById('az-promo-percent').value = 20;
+    document.getElementById('az-promo-event').value = '';
+    document.getElementById('az-promo-expires').value = '';
+    renderPromoTierChecks([]);
+    document.getElementById('az-promo-cancel').hidden = true;
+  }
+  async function loadPromoCoupons(){
+    var msgEl = document.getElementById('az-promo-msg');
+    try {
+      var evRes = await fetch('/api/admin/events');
+      var evData = await evRes.json();
+      promoEvents = evData.events || [];
+      var sel = document.getElementById('az-promo-event');
+      var current = sel.value;
+      sel.innerHTML = '<option value="">Tutti gli eventi</option>' + promoEvents.map(function(e){ return '<option value="' + esc(e.slug) + '">' + esc(e.name) + '</option>'; }).join('');
+      sel.value = current;
+      var res = await fetch('/api/admin/promo-coupons');
+      var data = await res.json();
+      if (!res.ok) { showMsg(msgEl, data.error || 'Errore nel caricamento.', true); return; }
+      msgEl.hidden = true;
+      promoCoupons = data.coupons || [];
+      renderPromoCoupons();
+    } catch (err) { showMsg(msgEl, 'Errore di connessione.', true); }
+  }
+  panelLoaders.codici = { loaded: false, load: loadPromoCoupons };
+  document.getElementById('az-promo-event').addEventListener('change', function(){ renderPromoTierChecks([]); });
+  document.getElementById('az-promo-cancel').addEventListener('click', resetPromoForm);
+  document.getElementById('az-promo-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    var msgEl = document.getElementById('az-promo-form-msg');
+    var payload = {
+      code: document.getElementById('az-promo-code').value.trim(),
+      label: document.getElementById('az-promo-label').value.trim(),
+      percentOff: Number(document.getElementById('az-promo-percent').value),
+      eventSlug: document.getElementById('az-promo-event').value,
+      tierIds: Array.prototype.map.call(document.querySelectorAll('#az-promo-tiers input:checked'), function(i){ return i.value; }),
+      expiresAt: localDatetimeToIso(document.getElementById('az-promo-expires').value)
+    };
+    try {
+      var res = await fetch('/api/admin/promo-coupons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      var data = await res.json();
+      if (!res.ok) { showMsg(msgEl, data.error || 'Errore.', true); return; }
+      msgEl.hidden = true;
+      var existing = promoCoupons.filter(function(c){ return c.code === data.code; })[0];
+      var updated = { code: data.code, percentOff: data.percentOff, label: payload.label, eventSlug: data.eventSlug, tierIds: data.tierIds || [], expiresAt: data.expiresAt, uses: existing ? existing.uses : 0, usedBy: existing ? existing.usedBy : [] };
+      promoCoupons = promoCoupons.filter(function(c){ return c.code !== data.code; }).concat([updated]);
+      renderPromoCoupons();
+      resetPromoForm();
+    } catch (err) { showMsg(msgEl, 'Errore di connessione.', true); }
+  });
+  document.getElementById('az-promo-list').addEventListener('click', async function(e){
+    var card = e.target.closest('[data-promo-code]');
+    if (!card) return;
+    var code = card.getAttribute('data-promo-code');
+    var c = promoCoupons.filter(function(x){ return x.code === code; })[0];
+    if (e.target.closest('[data-promo-copy]')) {
+      try { await navigator.clipboard.writeText(code); e.target.closest('button').textContent = '✓ Copiato'; } catch (err) { prompt('Copia il codice:', code); }
+      return;
+    }
+    if (e.target.closest('[data-promo-edit]') && c) {
+      document.getElementById('az-promo-form-title').textContent = 'Modifica ' + c.code;
+      document.getElementById('az-promo-code').value = c.code;
+      document.getElementById('az-promo-code').readOnly = true;
+      document.getElementById('az-promo-label').value = c.label || '';
+      document.getElementById('az-promo-percent').value = c.percentOff;
+      document.getElementById('az-promo-event').value = c.eventSlug || '';
+      renderPromoTierChecks(c.tierIds || []);
+      document.getElementById('az-promo-expires').value = c.expiresAt ? isoToLocalDatetime(c.expiresAt) : '';
+      document.getElementById('az-promo-cancel').hidden = false;
+      document.getElementById('az-promo-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (e.target.closest('[data-promo-delete]')) {
+      if (!confirm('Eliminare il codice ' + code + '? Chi lo ha già usato non viene toccato, ma nessuno potrà più usarlo.')) return;
+      var res = await fetch('/api/admin/promo-coupons?code=' + encodeURIComponent(code), { method: 'DELETE' });
+      if (res.ok) { promoCoupons = promoCoupons.filter(function(x){ return x.code !== code; }); renderPromoCoupons(); }
+      else showMsg(document.getElementById('az-promo-msg'), 'Impossibile eliminare.', true);
+    }
+  });
   document.getElementById('az-msgs-search').addEventListener('input', renderContactMsgs);
   document.getElementById('az-msgs-status-filter').addEventListener('change', renderContactMsgs);
   document.getElementById('az-msgs-refresh').addEventListener('click', loadContactMsgs);
