@@ -738,6 +738,46 @@ async function handleFetch(request, env, ctx) {
       }
     }
 
+    // Lotteria (pagina lotteria.html, QR stampato per le serate): stesso meccanismo del contributo
+    // commissione — registrazione su KV, pagamento incorporato Stripe, webhook che assegna i
+    // numeri — vedi il branch registration.type === "lottery" dentro handleStripeWebhook.
+    if (url.pathname === "/api/lottery-register" && request.method === "POST") {
+      const rl = await checkRateLimit(env, "RL_CHECKOUT", request, "lottery-register");
+      if (rl) return rl;
+      try {
+        return await handleLotteryRegister(request, env);
+      } catch (err) {
+        console.log("Errore lottery-register:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+    if (url.pathname === "/api/create-lottery-checkout-session" && request.method === "POST") {
+      const rl = await checkRateLimit(env, "RL_CHECKOUT", request, "lottery-checkout-session");
+      if (rl) return rl;
+      try {
+        return await handleCreateLotteryCheckoutSession(request, env);
+      } catch (err) {
+        console.log("Errore create-lottery-checkout-session:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+    if (url.pathname === "/api/lottery-tickets" && request.method === "GET") {
+      try {
+        return await handleLotteryTicketsBySession(request, env);
+      } catch (err) {
+        console.log("Errore lottery-tickets:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+    if (url.pathname === "/api/admin/lottery" && request.method === "GET") {
+      try {
+        return await handleAdminLottery(request, env);
+      } catch (err) {
+        console.log("Errore admin/lottery:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // Area personale: registrazione, login, verifica email, recupero password, dati account.
     if (url.pathname === "/api/account/register" && request.method === "POST") {
       const rl = await checkRateLimit(env, "RL_AUTH", request, "account-register");
@@ -3319,7 +3359,7 @@ async function runScheduledFeedback(env) {
 // staffsession: (token di login effimeri, si rigenerano da soli), evt:/feedback_sent: (marker
 // interni di dedup, non dati), registration: (esiste solo tra form e pagamento riuscito, viene
 // cancellata appena il webhook Stripe conferma — se esiste ancora è un acquisto abbandonato).
-const BACKUP_PREFIXES = ["ticket:", "account:", "staffaccount:", "loyalty:", "coupon:", "customernum:", "physicalcard:", "feedback:", "event:"];
+const BACKUP_PREFIXES = ["ticket:", "account:", "staffaccount:", "loyalty:", "coupon:", "customernum:", "physicalcard:", "feedback:", "event:", "lottery:"];
 
 // Scarica per intero ogni prefisso in BACKUP_PREFIXES (list() dà solo le chiavi, serve una get()
 // per ogni valore) più il contatore progressivo dei numeri cliente. Ritorna un oggetto pronto per
@@ -5386,6 +5426,91 @@ async function handleCreateCommissionCheckoutSession(request, env) {
   return jsonResponse({ clientSecret: session.client_secret, grossCents });
 }
 
+// Lotteria: ogni partecipazione costa 3€ tondi (come il contributo commissione, nessuna
+// maggiorazione Stripe in cima) e dà un numero; si possono comprare più numeri in un acquisto.
+const LOTTERY_PRICE_CENTS = 300;
+const LOTTERY_MAX_TICKETS = 20;
+const LOTTERY_PRODUCT_NAME = "Partecipazione alla lotteria — GrowMi";
+
+async function handleLotteryRegister(request, env) {
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const body = await request.json();
+  const name = String(body.name || "").trim().slice(0, 200);
+  const email = String(body.email || "").trim().slice(0, 200);
+  const phone = String(body.phone || "").trim().slice(0, 40);
+  const quantity = Math.floor(Number(body.quantity));
+  if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ error: "nome ed email valida sono obbligatori" }, 400);
+  if (!Number.isFinite(quantity) || quantity < 1 || quantity > LOTTERY_MAX_TICKETS) {
+    return jsonResponse({ error: `puoi comprare da 1 a ${LOTTERY_MAX_TICKETS} numeri alla volta` }, 400);
+  }
+  if (body.privacyAccepted !== true) return jsonResponse({ error: "devi accettare l'informativa privacy" }, 400);
+
+  const registrationId = crypto.randomUUID();
+  await env.TICKETS.put(`registration:${registrationId}`, JSON.stringify({
+    type: "lottery", name, email, phone, quantity, createdAt: new Date().toISOString()
+  }));
+  return jsonResponse({ registrationId });
+}
+
+async function handleCreateLotteryCheckoutSession(request, env) {
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  if (!env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY non configurato");
+
+  const { registrationId } = await request.json();
+  const rawReg = registrationId ? await env.TICKETS.get(`registration:${registrationId}`) : null;
+  if (!rawReg) return jsonResponse({ error: "registrazione non trovata o scaduta" }, 400);
+  const registration = JSON.parse(rawReg);
+  if (registration.type !== "lottery") return jsonResponse({ error: "registrazione non valida" }, 400);
+
+  const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+  const origin = new URL(request.url).origin;
+  const session = await stripe.checkout.sessions.create({
+    ui_mode: "embedded",
+    mode: "payment",
+    expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+    client_reference_id: registrationId,
+    customer_email: registration.email,
+    line_items: [{
+      quantity: registration.quantity,
+      price_data: { currency: "eur", unit_amount: LOTTERY_PRICE_CENTS, product_data: { name: LOTTERY_PRODUCT_NAME } }
+    }],
+    metadata: { type: "lottery", quantity: String(registration.quantity) },
+    return_url: `${origin}/lotteria-confermata?session_id={CHECKOUT_SESSION_ID}`
+  });
+
+  return jsonResponse({ clientSecret: session.client_secret, grossCents: LOTTERY_PRICE_CENTS * registration.quantity });
+}
+
+// Numeri assegnati a un acquisto (la pagina di conferma li mostra non appena il webhook li ha
+// scritti). session_id di Stripe non è indovinabile: basta a identificare l'acquisto.
+async function handleLotteryTicketsBySession(request, env) {
+  const sessionId = String(new URL(request.url).searchParams.get("session_id") || "").trim();
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return jsonResponse({ error: "sessione non valida" }, 400);
+  const raw = await env.TICKETS.get(`lotterysession:${sessionId}`);
+  if (!raw) return jsonResponse({ ready: false });
+  const rec = JSON.parse(raw);
+  return jsonResponse({ ready: true, numbers: rec.numbers });
+}
+
+// Elenco partecipanti (solo staff): un record per numero venduto.
+async function handleAdminLottery(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const entries = [];
+  let cursor = undefined;
+  do {
+    const page = await env.TICKETS.list({ prefix: "lottery:", cursor });
+    for (const key of page.keys) {
+      const raw = await env.TICKETS.get(key.name);
+      if (raw) entries.push(JSON.parse(raw));
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  entries.sort(function(a, b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
+  return jsonResponse({ priceCents: LOTTERY_PRICE_CENTS, entries });
+}
+
 async function handleStripeWebhook(request, env) {
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -5433,6 +5558,71 @@ async function handleStripeWebhook(request, env) {
 
     if (rawReg) {
       const registration = JSON.parse(rawReg);
+
+      // Lotteria: assegna un numero a ogni partecipazione acquistata (numeri casuali di 5 cifre,
+      // mai ripetuti), li registra e li manda via email. Non è un biglietto d'ingresso.
+      if (registration.type === "lottery") {
+        const numbers = [];
+        for (let i = 0; i < registration.quantity; i++) {
+          let number = null;
+          for (let attempt = 0; attempt < 30 && !number; attempt++) {
+            const candidate = String(10000 + Math.floor(Math.random() * 90000));
+            if (numbers.indexOf(candidate) === -1 && !await env.TICKETS.get(`lottery:${candidate}`)) number = candidate;
+          }
+          if (!number) throw new Error("impossibile assegnare un numero della lotteria");
+          await env.TICKETS.put(`lottery:${number}`, JSON.stringify({
+            number, name: registration.name, email: registration.email, phone: registration.phone,
+            createdAt: new Date().toISOString(), stripeSessionId: session.id
+          }));
+          numbers.push(number);
+        }
+        await env.TICKETS.put(`lotterysession:${session.id}`, JSON.stringify({ numbers, createdAt: new Date().toISOString() }));
+        await env.TICKETS.delete(`registration:${registrationId}`);
+        await env.TICKETS.put(dedupeKey, session.id);
+
+        if (env.RESEND_API_KEY) {
+          const numbersHtml = numbers.map(function(n){ return `<span style="display:inline-block; background:#2C0943; color:#FDC631; font-weight:700; border-radius:8px; padding:6px 12px; margin:3px;">${n}</span>`; }).join(" ");
+          try {
+            const resendRes = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                from: "GrowMi <noreply@growmi.it>",
+                to: registration.email,
+                subject: "I tuoi numeri della lotteria — GrowMi",
+                html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+                  `<p>Ciao ${registration.name},</p>` +
+                  `<p>grazie per aver partecipato alla lotteria GrowMi! Ecco ${numbers.length > 1 ? "i tuoi numeri" : "il tuo numero"}:</p>` +
+                  `<p>${numbersHtml}</p>` +
+                  `<p>Conservali: servono per ritirare il premio se vinci. In palio due longsleeve (una personalizzata GrowMi e una classica) per il primo e il secondo posto, più un accessorio (portachiavi).</p>` +
+                  `<p>In bocca al lupo! 🍀</p></div>`
+              })
+            });
+            if (!resendRes.ok) console.log("Resend lottery error:", resendRes.status, await resendRes.text());
+          } catch (e) {
+            console.log("Errore invio email lotteria:", e.message);
+          }
+          try {
+            const staffRes = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                from: "GrowMi <noreply@growmi.it>",
+                to: "grow.mi@outlook.it",
+                subject: `Nuova partecipazione alla lotteria (${numbers.length})`,
+                html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+                  `<p><strong>Nuova partecipazione alla lotteria</strong></p>` +
+                  `<p>${registration.name} — ${registration.email}${registration.phone ? " — " + registration.phone : ""}<br>` +
+                  `Numeri: ${numbers.join(", ")} (${(numbers.length * LOTTERY_PRICE_CENTS / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" })})</p></div>`
+              })
+            });
+            if (!staffRes.ok) console.log("Resend staff lottery notify error:", staffRes.status, await staffRes.text());
+          } catch (e) {
+            console.log("Errore invio notifica staff lotteria:", e.message);
+          }
+        }
+        return new Response("ok", { status: 200 });
+      }
 
       // Contributo commissione opera dal vivo: non è un biglietto d'ingresso, quindi niente QR/
       // codice/email "ticket" (che parla di ingresso/documento, fuorviante qui) — solo un

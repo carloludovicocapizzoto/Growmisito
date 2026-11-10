@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lotteria — GrowMi</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#2C0943">
+<link rel="icon" href="assets/img/logo-growmi.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://js.stripe.com/v3/"></script>
+<style>
+  :root{ --purple-deep:#3E0D5D; --purple-deeper:#2C0943; --coral:#F86639; --yellow:#FDC631; --cream:#FBF6F0; --ink:#1E0C2C; --grey:#6E6478; --line:#E6DED3; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--cream); color:var(--ink); font-family:'Inter', system-ui, sans-serif;
+    line-height:1.6; min-height:100vh; min-height:100dvh; display:flex; flex-direction:column;
+    align-items:center; padding:40px 20px; text-align:center;
+  }
+  h1{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:22px; margin-bottom:10px; }
+  .logo{ height:32px; margin-bottom:24px; }
+  .card{ width:100%; max-width:440px; background:#fff; border-radius:24px; padding:36px 28px; box-shadow:0 20px 50px rgba(30,12,44,0.1); }
+  p{ font-size:14.5px; color:var(--grey); }
+  .price{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:34px; color:var(--coral); margin:18px 0; }
+  form{ text-align:left; margin-top:20px; display:flex; flex-direction:column; gap:12px; }
+  label{ font-size:12.5px; font-weight:600; color:var(--ink); }
+  input{
+    width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line);
+    font-family:'Inter',sans-serif; font-size:15px; margin-top:4px;
+  }
+  input:focus{ outline:none; border-color:var(--coral); }
+  button{
+    margin-top:8px; padding:15px; border:none; border-radius:12px; background:var(--coral);
+    color:#fff; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; cursor:pointer;
+  }
+  button:disabled{ opacity:.6; cursor:default; }
+  #lt-status{ font-size:13px; color:var(--coral); margin-top:10px; }
+  #lt-checkout{ margin-top:20px; text-align:left; }
+  .prizes{ background:var(--cream); border-radius:14px; padding:16px 18px; margin:18px 0 4px; text-align:left; }
+  .prizes h2{ font-family:'Space Grotesk',sans-serif; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--coral); margin-bottom:8px; }
+  .prizes ul{ list-style:none; font-size:14px; color:var(--ink); }
+  .prizes li{ padding:3px 0; }
+  .qty{ display:flex; align-items:center; gap:12px; margin-top:4px; }
+  .qty button{ margin:0; width:44px; height:44px; padding:0; font-size:22px; line-height:1; }
+  .qty output{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; min-width:32px; text-align:center; }
+  .total{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; margin-top:2px; }
+  .check{ display:flex; gap:10px; align-items:flex-start; font-weight:500; font-size:13px; color:var(--grey); }
+  .check input{ width:auto; margin-top:3px; }
+  .check a{ color:var(--coral); }
+</style>
+</head>
+<body>
+
+<img class="logo" src="assets/img/logo-growmi.png" alt="GrowMi">
+<div class="card">
+  <h1>Lotteria GrowMi</h1>
+  <p>Partecipa e prova a vincere i premi in palio. Ogni numero costa 3€.</p>
+  <div class="price">€3</div>
+
+  <div class="prizes">
+    <h2>In palio</h2>
+    <ul>
+      <li>👕 <strong>2 longsleeve</strong>, per il 1° e il 2° posto: una personalizzata GrowMi e una classica</li>
+      <li>🔑 <strong>Un accessorio</strong> (portachiavi)</li>
+    </ul>
+  </div>
+
+  <form id="lt-form">
+    <div>
+      <label for="lt-name">Nome e cognome</label>
+      <input type="text" id="lt-name" autocomplete="name" required>
+    </div>
+    <div>
+      <label for="lt-email">Email</label>
+      <input type="email" id="lt-email" autocomplete="email" required>
+    </div>
+    <div>
+      <label for="lt-phone">Telefono (facoltativo)</label>
+      <input type="tel" id="lt-phone" autocomplete="tel">
+    </div>
+    <div>
+      <label>Quanti numeri vuoi?</label>
+      <div class="qty">
+        <button type="button" id="lt-minus" aria-label="Meno">−</button>
+        <output id="lt-qty">1</output>
+        <button type="button" id="lt-plus" aria-label="Più">+</button>
+      </div>
+      <p class="total" id="lt-total">Totale: €3</p>
+    </div>
+    <label class="check"><input type="checkbox" id="lt-privacy" required> <span>Ho letto l'<a href="/privacy-policy" target="_blank" rel="noopener">informativa privacy</a> e accetto che i miei dati siano usati per la lotteria.</span></label>
+    <button type="submit" id="lt-submit">Continua al pagamento</button>
+    <p id="lt-status" hidden></p>
+  </form>
+
+  <div id="lt-checkout" hidden></div>
+</div>
+
+<script>
+(function(){
+  var STRIPE_PUBLISHABLE_KEY = "pk_live_51RCPfzAlS0d4FgrwKgoxmfFsPUx1a7pAwn5707zCQ9PhmQYHJ41Ji4sXJt60YpD4IuDkEpUZwZe5YKRMz1lKJxbH00hrAkWQYt";
+  var PRICE = 3, MAX = 20;
+  var qty = 1;
+  var form = document.getElementById('lt-form');
+  var submitBtn = document.getElementById('lt-submit');
+  var status = document.getElementById('lt-status');
+  var checkoutWrap = document.getElementById('lt-checkout');
+
+  function renderQty(){
+    document.getElementById('lt-qty').textContent = qty;
+    document.getElementById('lt-total').textContent = 'Totale: €' + (qty * PRICE);
+  }
+  document.getElementById('lt-minus').addEventListener('click', function(){ if (qty > 1) { qty--; renderQty(); } });
+  document.getElementById('lt-plus').addEventListener('click', function(){ if (qty < MAX) { qty++; renderQty(); } });
+
+  form.addEventListener('submit', async function(e){
+    e.preventDefault();
+    submitBtn.disabled = true;
+    status.hidden = true;
+    try {
+      var regRes = await fetch('/api/lottery-register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: document.getElementById('lt-name').value.trim(),
+          email: document.getElementById('lt-email').value.trim(),
+          phone: document.getElementById('lt-phone').value.trim(),
+          quantity: qty,
+          privacyAccepted: document.getElementById('lt-privacy').checked
+        })
+      });
+      var regData = await regRes.json();
+      if (!regRes.ok) throw new Error(regData.error || 'Errore nella registrazione');
+
+      var sessRes = await fetch('/api/create-lottery-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registrationId: regData.registrationId })
+      });
+      var sessData = await sessRes.json();
+      if (!sessRes.ok) throw new Error(sessData.error || 'Errore nella creazione del pagamento');
+
+      form.hidden = true;
+      checkoutWrap.hidden = false;
+      var stripe = window.Stripe(STRIPE_PUBLISHABLE_KEY);
+      var checkout = await stripe.initEmbeddedCheckout({ clientSecret: sessData.clientSecret });
+      checkout.mount(checkoutWrap);
+    } catch (err) {
+      status.textContent = err.message || 'Errore di connessione, riprova.';
+      status.hidden = false;
+      submitBtn.disabled = false;
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

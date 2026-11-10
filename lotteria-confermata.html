@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lotteria — GrowMi</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#2C0943">
+<link rel="icon" href="assets/img/logo-growmi.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --purple-deep:#3E0D5D; --purple-deeper:#2C0943; --coral:#F86639; --yellow:#FDC631; --cream:#FBF6F0; --ink:#1E0C2C; --grey:#6E6478; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--cream); color:var(--ink); font-family:'Inter', system-ui, sans-serif;
+    line-height:1.6; min-height:100vh; min-height:100dvh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; padding:40px 20px; text-align:center;
+  }
+  h1{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:24px; margin-bottom:10px; }
+  .logo{ height:32px; margin-bottom:28px; }
+  .card{ width:100%; max-width:440px; background:#fff; border-radius:24px; padding:44px 32px; box-shadow:0 20px 50px rgba(30,12,44,0.1); }
+  .big{ font-size:44px; margin-bottom:14px; }
+  p{ font-size:14.5px; color:var(--grey); }
+  .nums{ margin:18px 0 6px; }
+  .nums span{ display:inline-block; background:var(--purple-deeper); color:var(--yellow); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; border-radius:10px; padding:8px 14px; margin:4px; }
+</style>
+</head>
+<body>
+
+<img class="logo" src="assets/img/logo-growmi.png" alt="GrowMi">
+<div class="card">
+  <div class="big">🎟️</div>
+  <h1>Sei in gioco!</h1>
+  <p id="lt-lead">Stiamo registrando il tuo pagamento…</p>
+  <div class="nums" id="lt-nums"></div>
+  <p style="margin-top:14px;">Ti mandiamo i numeri anche via email. Conservali: servono per ritirare il premio. In bocca al lupo da tutto il team GrowMi! 🍀</p>
+</div>
+<script>
+(function(){
+  var sid = new URLSearchParams(location.search).get('session_id');
+  var lead = document.getElementById('lt-lead'), nums = document.getElementById('lt-nums');
+  if (!sid) { lead.textContent = 'Grazie per aver partecipato alla lotteria!'; return; }
+  var tries = 0;
+  function check(){
+    fetch('/api/lottery-tickets?session_id=' + encodeURIComponent(sid)).then(function(r){ return r.json(); }).then(function(d){
+      if (d.ready && d.numbers) {
+        lead.textContent = d.numbers.length > 1 ? 'Questi sono i tuoi numeri:' : 'Questo è il tuo numero:';
+        nums.innerHTML = d.numbers.map(function(n){ return '<span>' + n + '</span>'; }).join('');
+      } else if (++tries < 15) { setTimeout(check, 2000); }
+      else { lead.textContent = 'Pagamento ricevuto! I tuoi numeri arrivano via email tra pochi minuti.'; }
+    }).catch(function(){ if (++tries < 15) setTimeout(check, 2000); });
+  }
+  check();
+})();
+</script>
+
+
+</body>
+</html>
