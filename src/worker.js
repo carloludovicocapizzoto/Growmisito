@@ -5221,9 +5221,13 @@ async function handleCreateCheckoutSession(request, env) {
     });
   }
 
+  // Il pagamento scade dopo 31 minuti (Stripe: minimo 30, di default 24 ore). I posti si controllano
+  // quando si apre il pagamento, non quando si paga: con 24 ore di validità una sessione aperta
+  // prima dell'ultimo posto poteva completarsi il giorno dopo e sforare la capienza.
   const session = await stripe.checkout.sessions.create({
     ui_mode: "embedded",
     mode: "payment",
+    expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     client_reference_id: registrationId,
     customer_email: registration.email,
     line_items: lineItems,
@@ -5556,6 +5560,45 @@ async function handleStripeWebhook(request, env) {
           if (!staffRes.ok) console.log("Resend staff notify error:", staffRes.status, await staffRes.text());
         } catch (e) {
           console.log("Errore invio notifica vendita a staff:", e.message);
+        }
+
+        // Avviso se questa vendita porta la fascia oltre la capienza (pagamento aperto prima
+        // dell'ultimo posto e completato dopo): i soldi sono già incassati, il biglietto è emesso,
+        // lo staff decide se tenerlo (alzando la capienza) o rimborsarlo da Stripe. Mai bloccante.
+        try {
+          const capacity = found?.tier?.capacity;
+          if (capacity && tierId) {
+            const issuedKeys = new Set(issued.map(function(it){ return `ticket:${it.ticketCode}`; }));
+            let soldOthers = 0;
+            let listCursor = undefined;
+            do {
+              const page = await env.TICKETS.list({ prefix: "ticket:", cursor: listCursor });
+              for (const key of page.keys) {
+                if (!issuedKeys.has(key.name) && key.metadata?.eventSlug === eventSlug && key.metadata?.tierId === tierId) soldOthers++;
+              }
+              listCursor = page.list_complete ? undefined : page.cursor;
+            } while (listCursor);
+            const soldNow = soldOthers + issued.length;
+            if (soldNow > capacity) {
+              const overRes = await fetch("https://api.resend.com/emails", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  from: "GrowMi <noreply@growmi.it>",
+                  to: "grow.mi@outlook.it",
+                  subject: `⚠️ Fascia oltre la capienza — ${eventName}`,
+                  html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+                    `<p><strong>Attenzione: ${found.tier.name} di ${eventName} ha ${soldNow} biglietti venduti su ${capacity} posti.</strong></p>` +
+                    `<p>L'ultimo acquisto (${customerName} — ${email}) era stato aperto prima che i posti finissero ed è stato completato dopo: il pagamento è già incassato e il biglietto è stato emesso.</p>` +
+                    `<p>Puoi tenerlo (alza la capienza della fascia nel pannello Eventi, altrimenti non potrai più salvare l'evento) oppure rimborsarlo da Stripe.</p>` +
+                    `</div>`
+                })
+              });
+              if (!overRes.ok) console.log("Resend overcapacity notify error:", overRes.status, await overRes.text());
+            }
+          }
+        } catch (e) {
+          console.log("Errore avviso fascia oltre capienza:", e.message);
         }
       }
     }
