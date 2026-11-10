@@ -258,6 +258,8 @@
         if (!res.ok) {
           checkoutContainer.textContent = data.error === "fascia esaurita"
             ? et_t("et_err_soldout", "Questa fascia si è appena esaurita — aggiorna la pagina e scegli quella successiva.")
+            : (data.error && data.error.indexOf("coupon non più valido") === 0)
+              ? data.error.replace("coupon non più valido: ", "")
             : data.error === "posti insufficienti"
               ? et_t("et_err_remaining", "In questa fascia restano solo {n} posti: aggiorna la pagina e riduci i biglietti.").replace("{n}", data.remaining)
               : et_t("et_err_generic", "Qualcosa è andato storto, riprova.");

@@ -2198,7 +2198,7 @@ async function handleAdminPromoCoupons(request, env) {
       for (const key of page.keys) {
         const raw = await env.TICKETS.get(key.name);
         const c = raw ? JSON.parse(raw) : null;
-        if (c && c.type === "percent") coupons.push({ code: key.name.slice("coupon:".length), percentOff: c.percentOff, label: c.label || "", eventSlug: c.eventSlug || null, expiresAt: c.expiresAt || null, uses: c.uses || 0, usedBy: c.usedBy || [] });
+        if (c && c.type === "percent") coupons.push({ code: key.name.slice("coupon:".length), percentOff: c.percentOff, label: c.label || "", eventSlug: c.eventSlug || null, tierIds: c.tierIds || [], expiresAt: c.expiresAt || null, uses: c.uses || 0, usedBy: c.usedBy || [] });
       }
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
@@ -2215,17 +2215,19 @@ async function handleAdminPromoCoupons(request, env) {
     if (eventSlug && !await getEvent(env, eventSlug)) return jsonResponse({ error: "evento non trovato" }, 400);
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     if (expiresAt && isNaN(expiresAt.getTime())) return jsonResponse({ error: "scadenza non valida" }, 400);
+    // Fasce a cui si applica (id come "fascia3"); vuoto = tutte le fasce dell'evento.
+    const tierIds = Array.isArray(body.tierIds) ? body.tierIds.map(function(t){ return String(t).trim(); }).filter(Boolean).slice(0, 20) : [];
     const existingRaw = await env.TICKETS.get(`coupon:${code}`);
     const existing = existingRaw ? JSON.parse(existingRaw) : null;
     if (existing && existing.type !== "percent") return jsonResponse({ error: "esiste già un codice con questo nome" }, 409);
     const coupon = Object.assign({}, existing || {}, {
       type: "percent", percentOff, label: String(body.label || "").trim().slice(0, 100),
-      eventSlug, expiresAt: expiresAt ? expiresAt.toISOString() : null,
+      eventSlug, tierIds, expiresAt: expiresAt ? expiresAt.toISOString() : null,
       createdAt: (existing && existing.createdAt) || new Date().toISOString(),
       uses: (existing && existing.uses) || 0, usedBy: (existing && existing.usedBy) || []
     });
     await env.TICKETS.put(`coupon:${code}`, JSON.stringify(coupon));
-    return jsonResponse({ ok: true, code, percentOff, eventSlug, expiresAt: coupon.expiresAt });
+    return jsonResponse({ ok: true, code, percentOff, eventSlug, tierIds, expiresAt: coupon.expiresAt });
   }
 
   if (request.method === "DELETE") {
@@ -4755,7 +4757,7 @@ async function handleNewsletterTrackClick(request, env) {
 // è già stato usato, ed è effettivamente di quella persona (mai fidarsi solo del codice — senza
 // il controllo email chiunque intercetti un codice altrui potrebbe usarlo). Usata sia da
 // handleRegister (al submit del form) sia da handleValidateCoupon (validazione live in pagina).
-async function validateCoupon(env, code, email, eventSlug) {
+async function validateCoupon(env, code, email, eventSlug, tierId) {
   const raw = await env.TICKETS.get(`coupon:${code}`);
   if (!raw) return { valid: false, error: "coupon non valido" };
   const coupon = JSON.parse(raw);
@@ -4764,6 +4766,7 @@ async function validateCoupon(env, code, email, eventSlug) {
   // aggiorna dal webhook, a pagamento completato.
   if (coupon.type === "percent") {
     if (coupon.eventSlug && eventSlug && coupon.eventSlug !== eventSlug) return { valid: false, error: "questo codice non vale per questo evento" };
+    if (Array.isArray(coupon.tierIds) && coupon.tierIds.length && tierId && coupon.tierIds.indexOf(tierId) === -1) return { valid: false, error: "questo codice non vale per questa fascia" };
     if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) return { valid: false, error: "codice scaduto" };
     return { valid: true, coupon };
   }
@@ -5263,7 +5266,7 @@ async function handleCreateCheckoutSession(request, env) {
   let couponApplied = null;
   let percentOff = 0;
   if (registration.couponCode) {
-    const check = await validateCoupon(env, registration.couponCode, registration.email, registration.eventSlug);
+    const check = await validateCoupon(env, registration.couponCode, registration.email, registration.eventSlug, tierId);
     if (!check.valid) return jsonResponse({ error: "coupon non più valido: " + check.error }, 400);
     couponApplied = registration.couponCode;
     if (check.coupon.type === "percent") {
