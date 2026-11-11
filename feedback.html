@@ -308,7 +308,7 @@
   if (formId) {
     loadDefaultLikedOptions(false);
   } else if (eventSlug) {
-    fetch("/api/event-tiers?event=" + encodeURIComponent(eventSlug))
+    fetch("/api/event-tiers?event=" + encodeURIComponent(eventSlug) + "&c=2")
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(data){
         var options = (data && Array.isArray(data.feedbackOptions)) ? data.feedbackOptions : [];

@@ -391,7 +391,14 @@ async function handleFetch(request, env, ctx) {
         const cache = caches.default;
         const cacheKey = new Request(url.toString(), { method: "GET" });
         const cached = await cache.match(cacheKey);
-        if (cached) return cached;
+        if (cached) {
+          // Cloudflare, sulle risposte che escono dalla sua cache, allunga da sé il tempo di cache
+          // del BROWSER (4 ore): ai clienti si manda sempre no-store, la cache vale solo sul server.
+          const out = new Response(cached.body, cached);
+          out.headers.set("Cache-Control", "no-store");
+          out.headers.delete("Age");
+          return out;
+        }
         const fresh = await handleEventTiers(request, env);
         if (fresh.status === 200) {
           const toCache = new Response(fresh.clone().body, fresh);

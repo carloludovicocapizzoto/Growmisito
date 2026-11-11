@@ -216,7 +216,7 @@
 
     async function loadTiers(){
       try {
-        var res = await fetch("/api/event-tiers?event=" + encodeURIComponent(slug));
+        var res = await fetch("/api/event-tiers?event=" + encodeURIComponent(slug) + "&c=2");
         var data = await res.json();
         if (res.ok) renderTiers(data);
       } catch (e) { /* si può riprovare ricaricando la pagina, non blocca il resto */ }
