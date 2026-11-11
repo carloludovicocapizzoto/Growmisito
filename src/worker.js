@@ -5450,8 +5450,10 @@ async function handleCreateCommissionCheckoutSession(request, env) {
 
 // Lotteria: ogni partecipazione costa 3€ tondi (come il contributo commissione, nessuna
 // maggiorazione Stripe in cima) e dà un numero; si possono comprare più numeri in un acquisto.
-const LOTTERY_PRICE_CENTS = 300;
-const LOTTERY_MAX_TICKETS = 20;
+// Si compra a pacchetti: 1 numero 3€, 3 numeri 8€, 5 numeri 12€ (chiave = quanti numeri, valore =
+// prezzo in centesimi). Il prezzo si calcola SEMPRE qui, mai dal client.
+const LOTTERY_PACKS = { 1: 300, 3: 800, 5: 1200 };
+const LOTTERY_PRICE_CENTS = LOTTERY_PACKS[1];
 const LOTTERY_PRODUCT_NAME = "Partecipazione alla lotteria — GrowMi";
 
 async function handleLotteryRegister(request, env) {
@@ -5462,8 +5464,8 @@ async function handleLotteryRegister(request, env) {
   const phone = String(body.phone || "").trim().slice(0, 40);
   const quantity = Math.floor(Number(body.quantity));
   if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ error: "nome ed email valida sono obbligatori" }, 400);
-  if (!Number.isFinite(quantity) || quantity < 1 || quantity > LOTTERY_MAX_TICKETS) {
-    return jsonResponse({ error: `puoi comprare da 1 a ${LOTTERY_MAX_TICKETS} numeri alla volta` }, 400);
+  if (!Object.prototype.hasOwnProperty.call(LOTTERY_PACKS, quantity)) {
+    return jsonResponse({ error: "scegli un pacchetto da 1, 3 o 5 numeri" }, 400);
   }
   if (body.privacyAccepted !== true) return jsonResponse({ error: "devi accettare l'informativa privacy" }, 400);
 
@@ -5493,14 +5495,14 @@ async function handleCreateLotteryCheckoutSession(request, env) {
     client_reference_id: registrationId,
     customer_email: registration.email,
     line_items: [{
-      quantity: registration.quantity,
-      price_data: { currency: "eur", unit_amount: LOTTERY_PRICE_CENTS, product_data: { name: LOTTERY_PRODUCT_NAME } }
+      quantity: 1,
+      price_data: { currency: "eur", unit_amount: LOTTERY_PACKS[registration.quantity], product_data: { name: `${LOTTERY_PRODUCT_NAME} — ${registration.quantity} ${registration.quantity === 1 ? "numero" : "numeri"}` } }
     }],
     metadata: { type: "lottery", quantity: String(registration.quantity) },
     return_url: `${origin}/lotteria-confermata?session_id={CHECKOUT_SESSION_ID}`
   });
 
-  return jsonResponse({ clientSecret: session.client_secret, grossCents: LOTTERY_PRICE_CENTS * registration.quantity });
+  return jsonResponse({ clientSecret: session.client_secret, grossCents: LOTTERY_PACKS[registration.quantity] });
 }
 
 // Numeri assegnati a un acquisto (la pagina di conferma li mostra non appena il webhook li ha
@@ -5530,7 +5532,7 @@ async function handleAdminLottery(request, env) {
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
   entries.sort(function(a, b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
-  return jsonResponse({ priceCents: LOTTERY_PRICE_CENTS, entries });
+  return jsonResponse({ priceCents: LOTTERY_PRICE_CENTS, packs: LOTTERY_PACKS, entries });
 }
 
 async function handleStripeWebhook(request, env) {
@@ -5635,7 +5637,7 @@ async function handleStripeWebhook(request, env) {
                 html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
                   `<p><strong>Nuova partecipazione alla lotteria</strong></p>` +
                   `<p>${registration.name} — ${registration.email}${registration.phone ? " — " + registration.phone : ""}<br>` +
-                  `Numeri: ${numbers.join(", ")} (${(numbers.length * LOTTERY_PRICE_CENTS / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" })})</p></div>`
+                  `Numeri: ${numbers.join(", ")} (${((LOTTERY_PACKS[numbers.length] || numbers.length * LOTTERY_PRICE_CENTS) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" })})</p></div>`
               })
             });
             if (!staffRes.ok) console.log("Resend staff lottery notify error:", staffRes.status, await staffRes.text());
