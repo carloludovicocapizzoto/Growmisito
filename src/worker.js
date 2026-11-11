@@ -5555,8 +5555,8 @@ async function handleAdminLottery(request, env) {
 const LOTTERY_DRAW_UNTIL_MS = Date.parse("2026-11-13T09:00:00Z");
 const LOTTERY_PRIZES = [
   { id: "portachiavi", label: "Portachiavi" },
-  { id: "secondo", label: "2° premio — Longsleeve" },
-  { id: "primo", label: "1° premio — Longsleeve" }
+  { id: "secondo", label: "2° premio — Longsleeve classica" },
+  { id: "primo", label: "1° premio — Longsleeve personalizzata GrowMi" }
 ];
 
 function lotteryDisplayName(name) {
