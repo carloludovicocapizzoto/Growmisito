@@ -383,7 +383,22 @@ async function handleFetch(request, env, ctx) {
 
     if (url.pathname === "/api/event-tiers" && request.method === "GET") {
       try {
-        return await handleEventTiers(request, env);
+        // Ogni visita alla pagina di un evento chiama questo endpoint, che elenca tutti i biglietti
+        // per contare i posti (1 operazione "list" di KV, di cui il piano gratuito ne concede 1.000
+        // al giorno). La risposta è uguale per tutti, quindi si riusa per 30 secondi dalla cache di
+        // Cloudflare invece di rileggere KV a ogni visitatore. Il controllo dei posti al pagamento
+        // (handleCreateCheckoutSession) resta sempre sul conteggio vero, mai su questa cache.
+        const cache = caches.default;
+        const cacheKey = new Request(url.toString(), { method: "GET" });
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+        const fresh = await handleEventTiers(request, env);
+        if (fresh.status === 200) {
+          const toCache = new Response(fresh.clone().body, fresh);
+          toCache.headers.set("Cache-Control", "public, max-age=30");
+          if (ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cacheKey, toCache));
+        }
+        return fresh;
       } catch (err) {
         console.log("Errore event-tiers:", err.stack || err.message);
         return jsonResponse({ error: err.message }, 500);
