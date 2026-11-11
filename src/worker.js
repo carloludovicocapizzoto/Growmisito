@@ -799,6 +799,15 @@ async function handleFetch(request, env, ctx) {
         return jsonResponse({ error: err.message }, 500);
       }
     }
+    // Estrazione della lotteria dall'app check-in (staff-checkin.html): chiave staff o login aziendale.
+    if (url.pathname === "/api/lottery-draw" && (request.method === "GET" || request.method === "POST")) {
+      try {
+        return await handleLotteryDraw(request, env);
+      } catch (err) {
+        console.log("Errore lottery-draw:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
 
     // Area personale: registrazione, login, verifica email, recupero password, dati account.
     if (url.pathname === "/api/account/register" && request.method === "POST") {
@@ -5533,6 +5542,102 @@ async function handleAdminLottery(request, env) {
   } while (cursor);
   entries.sort(function(a, b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
   return jsonResponse({ priceCents: LOTTERY_PRICE_CENTS, packs: LOTTERY_PACKS, entries });
+}
+
+// ----------------------------------------------------------------------------------------------
+// Estrazione della lotteria (ruota della fortuna nell'app check-in). Temporanea: dopo
+// LOTTERY_DRAW_UNTIL_MS le rotte rispondono 410 e il pulsante sparisce dall'app. L'estrazione si
+// fa sul server (numero scelto con crypto.getRandomValues) e ogni risultato resta salvato, così
+// una pagina ricaricata o un secondo telefono vedono gli stessi vincitori.
+// Regole: un numero estratto non esce più; una persona (stessa email) vince un solo premio,
+// anche se ha comprato più numeri; "Assente, riestrai" annulla il vincitore e ne estrae un altro.
+// ----------------------------------------------------------------------------------------------
+const LOTTERY_DRAW_UNTIL_MS = Date.parse("2026-11-13T09:00:00Z");
+const LOTTERY_PRIZES = [
+  { id: "portachiavi", label: "Portachiavi" },
+  { id: "secondo", label: "2° premio — Longsleeve" },
+  { id: "primo", label: "1° premio — Longsleeve" }
+];
+
+function lotteryDisplayName(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.` : parts[0];
+}
+
+function secureRandomIndex(n) {
+  const buf = new Uint32Array(1);
+  const limit = Math.floor(0x100000000 / n) * n;
+  do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+  return buf[0] % n;
+}
+
+async function loadLotteryEntries(env) {
+  const entries = [];
+  let cursor = undefined;
+  do {
+    const page = await env.TICKETS.list({ prefix: "lottery:", cursor });
+    for (const key of page.keys) {
+      const raw = await env.TICKETS.get(key.name);
+      if (raw) entries.push(JSON.parse(raw));
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return entries;
+}
+
+async function handleLotteryDraw(request, env) {
+  const auth = await requireStaffAccountOrKey(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  if (Date.now() > LOTTERY_DRAW_UNTIL_MS) return jsonResponse({ error: "l'estrazione non è più disponibile" }, 410);
+
+  const stored = JSON.parse((await env.TICKETS.get("lotterydraws")) || '{"draws":[]}');
+  const draws = Array.isArray(stored.draws) ? stored.draws : [];
+  const entries = await loadLotteryEntries(env);
+
+  // Numeri ancora estraibili: non già usciti, e di persone che non hanno già un premio (o un
+  // vincitore annullato perché assente).
+  const usedNumbers = new Set(draws.map(function(d){ return d.number; }));
+  const usedEmails = new Set(draws.map(function(d){ return String(d.email || "").toLowerCase(); }).filter(Boolean));
+  const eligible = entries.filter(function(e){
+    return !usedNumbers.has(e.number) && !usedEmails.has(String(e.email || "").toLowerCase());
+  });
+
+  const publicState = function() {
+    return {
+      prizes: LOTTERY_PRIZES.map(function(p){
+        const w = draws.filter(function(d){ return d.prizeId === p.id && d.status === "valid"; })[0];
+        return { id: p.id, label: p.label, winner: w ? { number: w.number, name: w.displayName } : null };
+      }),
+      numbers: eligible.map(function(e){ return e.number; }),
+      totalNumbers: entries.length
+    };
+  };
+
+  if (request.method === "GET") return jsonResponse(publicState());
+
+  const body = await request.json();
+  const prize = LOTTERY_PRIZES.filter(function(p){ return p.id === body.prizeId; })[0];
+  if (!prize) return jsonResponse({ error: "premio non valido" }, 400);
+  const current = draws.filter(function(d){ return d.prizeId === prize.id && d.status === "valid"; })[0];
+  if (current && body.redraw !== true) return jsonResponse({ error: "questo premio ha già un vincitore" }, 409);
+  if (!eligible.length) return jsonResponse({ error: "nessun numero disponibile per l'estrazione" }, 409);
+
+  const winner = eligible[secureRandomIndex(eligible.length)];
+  if (current) current.status = "void";
+  draws.push({
+    prizeId: prize.id, number: winner.number, email: winner.email, displayName: lotteryDisplayName(winner.name),
+    drawnAt: new Date().toISOString(), status: "valid"
+  });
+  await env.TICKETS.put("lotterydraws", JSON.stringify({ draws }));
+  // Lo stato restituito esclude già il numero appena estratto dai numeri estraibili.
+  const usedAfter = new Set(draws.map(function(d){ return d.number; }));
+  const emailsAfter = new Set(draws.map(function(d){ return String(d.email || "").toLowerCase(); }));
+  eligible.splice(0, eligible.length, ...eligible.filter(function(e){
+    return !usedAfter.has(e.number) && !emailsAfter.has(String(e.email || "").toLowerCase());
+  }));
+  return jsonResponse({ ok: true, prizeId: prize.id, number: winner.number, name: lotteryDisplayName(winner.name), state: publicState() });
 }
 
 async function handleStripeWebhook(request, env) {
