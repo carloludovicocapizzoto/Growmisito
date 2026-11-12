@@ -365,7 +365,7 @@
     <div class="walkin-field">
       <label>Fascia</label>
       <select id="walkinTier"></select>
-      <p class="walkin-hint">Preselezionata l'ultima fascia (prezzo pieno) — cambiala solo per eccezioni (sconti, omaggi...).</p>
+      <p class="walkin-hint">Preselezionata l'ultima fascia ancora in vendita (prezzo pieno). Puoi scegliere anche le fasce esaurite online (es. 10 o 13 €) per amici e conoscenti.</p>
     </div>
     <div class="walkin-field">
       <label>Nome e cognome</label>
@@ -835,8 +835,9 @@
         t.options.forEach(function(o){
           var opt = document.createElement("option");
           opt.value = t.id + "::" + o.id;
-          opt.textContent = t.name + " — " + o.label + " (€" + (o.priceCents / 100).toFixed(2) + ")" + (t.soldOut ? " — esaurita" : "");
-          if (t.soldOut) opt.disabled = true;
+          opt.textContent = t.name + " — " + o.label + " (€" + (o.priceCents / 100).toFixed(2) + ")" + (t.soldOut ? " — esaurita online" : "");
+          // Una fascia esaurita online resta selezionabile alla porta (es. amici a prezzo più basso).
+          if (t.soldOut) opt.setAttribute("data-soldout", "1");
           walkinTierSelect.appendChild(opt);
         });
       });
@@ -846,7 +847,8 @@
         // Chi paga alla porta paga il prezzo pieno (l'ultima fascia, es. "Terza fascia"), mai le
         // fasce scontate riservate a chi ha comprato in anticipo online — preselezionata di
         // default, ma lo staff può comunque cambiarla per le rare eccezioni (sconti, omaggi...).
-        var options = Array.prototype.slice.call(walkinTierSelect.children).filter(function(o){ return !o.disabled; });
+        var options = Array.prototype.slice.call(walkinTierSelect.children).filter(function(o){ return !o.getAttribute("data-soldout"); });
+        if (!options.length) options = Array.prototype.slice.call(walkinTierSelect.children);
         if (options.length) walkinTierSelect.value = options[options.length - 1].value;
       }
     } catch (e) {
