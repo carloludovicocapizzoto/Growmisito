@@ -76,7 +76,7 @@
   <form id="lt-form">
     <div>
       <label for="lt-name">Nome e cognome</label>
-      <input type="text" id="lt-name" autocomplete="name" required>
+      <input type="text" id="lt-name" autocomplete="name" placeholder="Nome e cognome (es. Mario Rossi)" required>
     </div>
     <div>
       <label for="lt-email">Email</label>
@@ -122,6 +122,11 @@
 
   form.addEventListener('submit', async function(e){
     e.preventDefault();
+    if (document.getElementById('lt-name').value.trim().split(/\s+/).filter(Boolean).length < 2) {
+      status.textContent = 'Scrivi nome e cognome, servono per consegnare il premio.';
+      status.hidden = false;
+      return;
+    }
     submitBtn.disabled = true;
     status.hidden = true;
     try {

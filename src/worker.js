@@ -5473,6 +5473,7 @@ async function handleLotteryRegister(request, env) {
   const phone = String(body.phone || "").trim().slice(0, 40);
   const quantity = Math.floor(Number(body.quantity));
   if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ error: "nome ed email valida sono obbligatori" }, 400);
+  if (name.split(/\s+/).filter(Boolean).length < 2) return jsonResponse({ error: "scrivi nome e cognome, servono per consegnare il premio" }, 400);
   if (!Object.prototype.hasOwnProperty.call(LOTTERY_PACKS, quantity)) {
     return jsonResponse({ error: "scegli un pacchetto da 1, 3 o 5 numeri" }, 400);
   }
