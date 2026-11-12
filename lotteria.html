@@ -83,6 +83,10 @@
       <input type="email" id="lt-email" autocomplete="email" required>
     </div>
     <div>
+      <label for="lt-code">Codice omaggio (facoltativo)</label>
+      <input type="text" id="lt-code" autocomplete="off" autocapitalize="characters">
+    </div>
+    <div>
       <label for="lt-phone">Telefono (facoltativo)</label>
       <input type="tel" id="lt-phone" autocomplete="tel">
     </div>
@@ -138,11 +142,14 @@
           email: document.getElementById('lt-email').value.trim(),
           phone: document.getElementById('lt-phone').value.trim(),
           quantity: qty,
+          couponCode: document.getElementById('lt-code').value.trim(),
           privacyAccepted: document.getElementById('lt-privacy').checked
         })
       });
       var regData = await regRes.json();
       if (!regRes.ok) throw new Error(regData.error || 'Errore nella registrazione');
+
+      if (regData.free) { window.location.href = '/lotteria-confermata?session_id=' + encodeURIComponent(regData.sessionId); return; }
 
       var sessRes = await fetch('/api/create-lottery-checkout-session', {
         method: 'POST',

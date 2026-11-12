@@ -2279,11 +2279,13 @@ async function handleAdminPromoCoupons(request, env) {
   if (request.method === "POST") {
     const body = await request.json().catch(function(){ return {}; });
     const code = String(body.code || "").trim().toUpperCase();
-    const percentOff = Number(body.percentOff);
+    const percentOff = body.lottery === true ? 100 : Number(body.percentOff);
     if (!/^[A-Z0-9-]{3,30}$/.test(code)) return jsonResponse({ error: "codice non valido (3-30 lettere, numeri o trattini)" }, 400);
     if (!Number.isFinite(percentOff) || percentOff <= 0 || percentOff > 100) return jsonResponse({ error: "percentuale non valida" }, 400);
-    const eventSlug = String(body.eventSlug || "").trim() || null;
-    if (eventSlug && !await getEvent(env, eventSlug)) return jsonResponse({ error: "evento non trovato" }, 400);
+    // Codice per la lotteria (body.lottery): sempre 100% e a usi limitati; non è legato a un evento.
+    const isLottery = body.lottery === true;
+    const eventSlug = isLottery ? "lotteria" : (String(body.eventSlug || "").trim() || null);
+    if (!isLottery && eventSlug && !await getEvent(env, eventSlug)) return jsonResponse({ error: "evento non trovato" }, 400);
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     if (expiresAt && isNaN(expiresAt.getTime())) return jsonResponse({ error: "scadenza non valida" }, 400);
     // Fasce a cui si applica (id come "fascia3"); vuoto = tutte le fasce dell'evento.
@@ -2296,7 +2298,7 @@ async function handleAdminPromoCoupons(request, env) {
       eventSlug, tierIds, expiresAt: expiresAt ? expiresAt.toISOString() : null,
       createdAt: (existing && existing.createdAt) || new Date().toISOString(),
       uses: (existing && existing.uses) || 0, usedBy: (existing && existing.usedBy) || []
-    });
+    }, isLottery ? { maxUses: Math.max(1, Math.min(500, Math.floor(Number(body.maxUses)) || 1)) } : {});
     await env.TICKETS.put(`coupon:${code}`, JSON.stringify(coupon));
     return jsonResponse({ ok: true, code, percentOff, eventSlug, tierIds, expiresAt: coupon.expiresAt });
   }
@@ -5479,6 +5481,27 @@ async function handleLotteryRegister(request, env) {
   }
   if (body.privacyAccepted !== true) return jsonResponse({ error: "devi accettare l'informativa privacy" }, 400);
 
+  // Codice gratuito (omaggi, prove): solo codici al 100% creati dallo staff per la lotteria, con un
+  // numero massimo di usi. Niente pagamento: i numeri si assegnano subito, come dopo un pagamento.
+  const couponCode = String(body.couponCode || "").trim().toUpperCase();
+  if (couponCode) {
+    const check = await validateCoupon(env, couponCode, email, "lotteria");
+    if (!check.valid || check.coupon.type !== "percent" || check.coupon.eventSlug !== "lotteria" || Number(check.coupon.percentOff) !== 100) {
+      return jsonResponse({ error: check.error || "codice non valido per la lotteria" }, 400);
+    }
+    const maxUses = Number(check.coupon.maxUses) || 1;
+    if ((check.coupon.uses || 0) >= maxUses) return jsonResponse({ error: "codice già utilizzato" }, 400);
+    // Il conteggio degli usi sale prima dell'assegnazione: due richieste insieme non superano il tetto.
+    check.coupon.uses = (check.coupon.uses || 0) + 1;
+    check.coupon.usedBy = (check.coupon.usedBy || []).concat([email.toLowerCase()]);
+    await env.TICKETS.put(`coupon:${couponCode}`, JSON.stringify(check.coupon));
+    const sessionId = "cs_free_" + crypto.randomUUID().replace(/-/g, "");
+    const registration = { type: "lottery", name, email, phone, quantity };
+    const numbers = await assignLotteryNumbers(env, registration, sessionId, true);
+    await sendLotteryEmails(env, registration, numbers, couponCode);
+    return jsonResponse({ free: true, sessionId });
+  }
+
   const registrationId = crypto.randomUUID();
   await env.TICKETS.put(`registration:${registrationId}`, JSON.stringify({
     type: "lottery", name, email, phone, quantity, createdAt: new Date().toISOString()
@@ -5641,6 +5664,74 @@ async function handleLotteryDraw(request, env) {
   return jsonResponse({ ok: true, prizeId: prize.id, number: winner.number, name: lotteryDisplayName(winner.name), state: publicState() });
 }
 
+// Assegna i numeri di una partecipazione alla lotteria (casuali di 5 cifre, mai ripetuti) e li
+// salva; usata sia dal webhook Stripe (pagamento) sia dal codice gratuito (nessun pagamento).
+async function assignLotteryNumbers(env, registration, sessionId, free) {
+  const numbers = [];
+  for (let i = 0; i < registration.quantity; i++) {
+    let number = null;
+    for (let attempt = 0; attempt < 30 && !number; attempt++) {
+      const candidate = String(10000 + Math.floor(Math.random() * 90000));
+      if (numbers.indexOf(candidate) === -1 && !await env.TICKETS.get(`lottery:${candidate}`)) number = candidate;
+    }
+    if (!number) throw new Error("impossibile assegnare un numero della lotteria");
+    await env.TICKETS.put(`lottery:${number}`, JSON.stringify({
+      number, name: registration.name, email: registration.email, phone: registration.phone,
+      createdAt: new Date().toISOString(), stripeSessionId: sessionId, free: free === true
+    }));
+    numbers.push(number);
+  }
+  await env.TICKETS.put(`lotterysession:${sessionId}`, JSON.stringify({ numbers, createdAt: new Date().toISOString() }));
+  return numbers;
+}
+
+// Email col numero al partecipante e avviso allo staff. freeCode = codice usato (null se pagato).
+async function sendLotteryEmails(env, registration, numbers, freeCode) {
+  if (!env.RESEND_API_KEY) return;
+  const numbersHtml = numbers.map(function(n){ return `<span style="display:inline-block; background:#2C0943; color:#FDC631; font-weight:700; border-radius:8px; padding:6px 12px; margin:3px;">${n}</span>`; }).join(" ");
+  try {
+    const resendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "GrowMi <noreply@growmi.it>",
+        to: registration.email,
+        subject: "I tuoi numeri della lotteria — GrowMi",
+        html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+          `<p>Ciao ${registration.name},</p>` +
+          `<p>grazie per aver partecipato alla lotteria GrowMi! Ecco ${numbers.length > 1 ? "i tuoi numeri" : "il tuo numero"}:</p>` +
+          `<p>${numbersHtml}</p>` +
+          `<p>Conservali: servono per ritirare il premio se vinci. In palio due longsleeve (una personalizzata GrowMi e una classica) per il primo e il secondo posto, più un accessorio (portachiavi).</p>` +
+          `<p>In bocca al lupo! 🍀</p></div>`
+      })
+    });
+    if (!resendRes.ok) console.log("Resend lottery error:", resendRes.status, await resendRes.text());
+  } catch (e) {
+    console.log("Errore invio email lotteria:", e.message);
+  }
+  try {
+    const amountText = freeCode
+      ? `omaggio con codice ${freeCode}`
+      : ((LOTTERY_PACKS[numbers.length] || numbers.length * LOTTERY_PRICE_CENTS) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+    const staffRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "GrowMi <noreply@growmi.it>",
+        to: "grow.mi@outlook.it",
+        subject: `Nuova partecipazione alla lotteria (${numbers.length})`,
+        html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
+          `<p><strong>Nuova partecipazione alla lotteria</strong></p>` +
+          `<p>${registration.name} — ${registration.email}${registration.phone ? " — " + registration.phone : ""}<br>` +
+          `Numeri: ${numbers.join(", ")} (${amountText})</p></div>`
+      })
+    });
+    if (!staffRes.ok) console.log("Resend staff lottery notify error:", staffRes.status, await staffRes.text());
+  } catch (e) {
+    console.log("Errore invio notifica staff lotteria:", e.message);
+  }
+}
+
 async function handleStripeWebhook(request, env) {
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -5692,65 +5783,10 @@ async function handleStripeWebhook(request, env) {
       // Lotteria: assegna un numero a ogni partecipazione acquistata (numeri casuali di 5 cifre,
       // mai ripetuti), li registra e li manda via email. Non è un biglietto d'ingresso.
       if (registration.type === "lottery") {
-        const numbers = [];
-        for (let i = 0; i < registration.quantity; i++) {
-          let number = null;
-          for (let attempt = 0; attempt < 30 && !number; attempt++) {
-            const candidate = String(10000 + Math.floor(Math.random() * 90000));
-            if (numbers.indexOf(candidate) === -1 && !await env.TICKETS.get(`lottery:${candidate}`)) number = candidate;
-          }
-          if (!number) throw new Error("impossibile assegnare un numero della lotteria");
-          await env.TICKETS.put(`lottery:${number}`, JSON.stringify({
-            number, name: registration.name, email: registration.email, phone: registration.phone,
-            createdAt: new Date().toISOString(), stripeSessionId: session.id
-          }));
-          numbers.push(number);
-        }
-        await env.TICKETS.put(`lotterysession:${session.id}`, JSON.stringify({ numbers, createdAt: new Date().toISOString() }));
+        const numbers = await assignLotteryNumbers(env, registration, session.id, false);
         await env.TICKETS.delete(`registration:${registrationId}`);
         await env.TICKETS.put(dedupeKey, session.id);
-
-        if (env.RESEND_API_KEY) {
-          const numbersHtml = numbers.map(function(n){ return `<span style="display:inline-block; background:#2C0943; color:#FDC631; font-weight:700; border-radius:8px; padding:6px 12px; margin:3px;">${n}</span>`; }).join(" ");
-          try {
-            const resendRes = await fetch("https://api.resend.com/emails", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                from: "GrowMi <noreply@growmi.it>",
-                to: registration.email,
-                subject: "I tuoi numeri della lotteria — GrowMi",
-                html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
-                  `<p>Ciao ${registration.name},</p>` +
-                  `<p>grazie per aver partecipato alla lotteria GrowMi! Ecco ${numbers.length > 1 ? "i tuoi numeri" : "il tuo numero"}:</p>` +
-                  `<p>${numbersHtml}</p>` +
-                  `<p>Conservali: servono per ritirare il premio se vinci. In palio due longsleeve (una personalizzata GrowMi e una classica) per il primo e il secondo posto, più un accessorio (portachiavi).</p>` +
-                  `<p>In bocca al lupo! 🍀</p></div>`
-              })
-            });
-            if (!resendRes.ok) console.log("Resend lottery error:", resendRes.status, await resendRes.text());
-          } catch (e) {
-            console.log("Errore invio email lotteria:", e.message);
-          }
-          try {
-            const staffRes = await fetch("https://api.resend.com/emails", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                from: "GrowMi <noreply@growmi.it>",
-                to: "grow.mi@outlook.it",
-                subject: `Nuova partecipazione alla lotteria (${numbers.length})`,
-                html: `<div style="font-family:Arial,sans-serif; font-size:15px; color:#1E0C2C; line-height:1.6;">` +
-                  `<p><strong>Nuova partecipazione alla lotteria</strong></p>` +
-                  `<p>${registration.name} — ${registration.email}${registration.phone ? " — " + registration.phone : ""}<br>` +
-                  `Numeri: ${numbers.join(", ")} (${((LOTTERY_PACKS[numbers.length] || numbers.length * LOTTERY_PRICE_CENTS) / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" })})</p></div>`
-              })
-            });
-            if (!staffRes.ok) console.log("Resend staff lottery notify error:", staffRes.status, await staffRes.text());
-          } catch (e) {
-            console.log("Errore invio notifica staff lotteria:", e.message);
-          }
-        }
+        await sendLotteryEmails(env, registration, numbers, null);
         return new Response("ok", { status: 200 });
       }
 
