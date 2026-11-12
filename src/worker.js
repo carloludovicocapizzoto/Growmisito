@@ -799,6 +799,14 @@ async function handleFetch(request, env, ctx) {
         return jsonResponse({ error: err.message }, 500);
       }
     }
+    if (url.pathname === "/api/admin/lottery" && request.method === "DELETE") {
+      try {
+        return await handleAdminDeleteFreeLotteryEntry(request, env);
+      } catch (err) {
+        console.log("Errore admin/lottery DELETE:", err.stack || err.message);
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
     // Estrazione della lotteria dall'app check-in (staff-checkin.html): chiave staff o login aziendale.
     if (url.pathname === "/api/lottery-draw" && (request.method === "GET" || request.method === "POST")) {
       try {
@@ -5568,6 +5576,23 @@ async function handleLotteryTicketsBySession(request, env) {
 }
 
 // Elenco partecipanti (solo staff): un record per numero venduto.
+// Toglie un numero della lotteria, ma SOLO se è un omaggio (codice gratuito, es. una prova): i
+// numeri pagati non si cancellano da qui. Solo login aziendale.
+async function handleAdminDeleteFreeLotteryEntry(request, env) {
+  const auth = await requireStaffAccount(request, env);
+  if (auth.error) return auth.error;
+  if (!env.TICKETS) throw new Error("Binding KV 'TICKETS' non configurato");
+  const number = String(new URL(request.url).searchParams.get("number") || "").trim();
+  if (!/^\d{5}$/.test(number)) return jsonResponse({ error: "numero non valido" }, 400);
+  const raw = await env.TICKETS.get(`lottery:${number}`);
+  if (!raw) return jsonResponse({ error: "numero non trovato" }, 404);
+  const entry = JSON.parse(raw);
+  if (entry.free !== true) return jsonResponse({ error: "si possono togliere solo i numeri omaggio, non quelli pagati" }, 400);
+  await env.TICKETS.delete(`lottery:${number}`);
+  if (entry.stripeSessionId) await env.TICKETS.delete(`lotterysession:${entry.stripeSessionId}`);
+  return jsonResponse({ ok: true, removed: number });
+}
+
 async function handleAdminLottery(request, env) {
   const auth = await requireStaffAccount(request, env);
   if (auth.error) return auth.error;
