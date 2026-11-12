@@ -2524,6 +2524,19 @@ async function handleStats(request, env) {
   const url = new URL(request.url);
   const eventSlug = url.searchParams.get("event");
 
+  // Ogni telefono dello staff chiede questi numeri di continuo e ogni richiesta è un'operazione
+  // "list" di KV (1.000 al giorno sul piano gratuito): il risultato si riusa per 60 secondi, uguale
+  // per tutti i telefoni. Il controllo della chiave staff è già avvenuto qui sopra, prima della cache.
+  const cache = caches.default;
+  const cacheKey = new Request("https://cache.growmi.internal/api/stats?event=" + encodeURIComponent(eventSlug || ""), { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const out = new Response(cached.body, cached);
+    out.headers.set("Cache-Control", "no-store");
+    out.headers.delete("Age");
+    return out;
+  }
+
   let total = 0;
   let checkedIn = 0;
   let cursor = undefined;
@@ -2537,7 +2550,12 @@ async function handleStats(request, env) {
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
 
-  return jsonResponse({ total, checkedIn });
+  const toCache = jsonResponse({ total, checkedIn });
+  toCache.headers.set("Cache-Control", "public, max-age=60");
+  await cache.put(cacheKey, toCache.clone());
+  const fresh = jsonResponse({ total, checkedIn });
+  fresh.headers.set("Cache-Control", "no-store");
+  return fresh;
 }
 
 // Elenco eventi per il menu dello scanner (staff-checkin.html): stessa fonte di verità già usata

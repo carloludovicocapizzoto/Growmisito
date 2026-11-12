@@ -488,7 +488,8 @@
     document.getElementById("attendeesSearchWrap").classList.remove("open");
     attendeesOpen = false;
     document.getElementById("walkinBtn").hidden = mode !== "checkin" || !selectedEvent;
-    refreshStats();
+    shownTotal = 0; shownChecked = 0;
+    refreshStats(true);
     closeDrawer();
   }
 
@@ -581,6 +582,7 @@
 
   async function loadAttendeesList(){
     if (!selectedEvent) { rosterItems = []; renderRoster(); return; }
+    lastRosterFetch = Date.now();
     try {
       var res = await fetch("/api/event-roster?event=" + encodeURIComponent(selectedEvent), { headers: { "X-Staff-Key": getStaffKey() } });
       if (res.status === 401) { onUnauthorized(); return; }
@@ -589,6 +591,12 @@
       rosterItems = data.roster || [];
       renderRoster();
     } catch (e) { /* connessione assente: la lista resta come prima */ }
+  }
+
+  var lastRosterFetch = 0;
+  function loadAttendeesListThrottled(){
+    if (Date.now() - lastRosterFetch < 20000) return;
+    loadAttendeesList();
   }
 
   document.getElementById("attendeesLink").addEventListener("click", function(){
@@ -604,14 +612,27 @@
 
   // Numeri veri (venduti/entrati), letti dal server ad ogni apertura e dopo ogni scansione
   // riuscita — non un conteggio locale che si azzera cambiando dispositivo o ricaricando.
-  async function refreshStats(){
+  // Ogni lettura dal server è un'operazione "list" di KV (limite giornaliero sul piano gratuito):
+  // si legge al massimo ogni 20 secondi, e dopo una scansione o una vendita in loco il numero sale
+  // subito di 1 da solo (senza leggere). Il server tiene i numeri in cache 60 secondi, quindi una
+  // lettura può essere un po' indietro: il numero mostrato non scende mai sotto quello già contato qui.
+  var lastStatsFetch = 0;
+  var shownTotal = 0, shownChecked = 0;
+  function showStats(){ statTotal.textContent = shownTotal; statCheckedIn.textContent = shownChecked; }
+  function bumpStats(addSold, addChecked){
+    shownTotal += addSold; shownChecked += addChecked; showStats();
+  }
+  async function refreshStats(force){
+    if (force !== true && Date.now() - lastStatsFetch < 20000) return;
+    lastStatsFetch = Date.now();
     try {
       var qs = selectedEvent ? ("?event=" + encodeURIComponent(selectedEvent)) : "";
       var res = await fetch("/api/stats" + qs, { headers: { "X-Staff-Key": getStaffKey() } });
       if (!res.ok) return;
       var data = await res.json();
-      statTotal.textContent = data.total;
-      statCheckedIn.textContent = data.checkedIn;
+      shownTotal = Math.max(data.total, shownTotal);
+      shownChecked = Math.max(data.checkedIn, shownChecked);
+      showStats();
     } catch (e) { /* connessione assente: lascia i numeri come sono */ }
   }
 
@@ -729,8 +750,8 @@
         return;
       }
       if (data.valid) {
-        refreshStats();
-        if (attendeesOpen) loadAttendeesList();
+        bumpStats(0, 1);
+        if (attendeesOpen) loadAttendeesListThrottled();
         if (data.stamps !== null && data.stamps !== undefined) {
           stampsGivenCount++;
           statStampsGiven.textContent = stampsGivenCount;
@@ -893,8 +914,8 @@
       var data = await res.json();
       if (res.ok && data.ok) {
         closeWalkinPanel();
-        refreshStats();
-        if (attendeesOpen) loadAttendeesList();
+        bumpStats(1, 1);
+        if (attendeesOpen) loadAttendeesListThrottled();
         if (data.stamps !== null && data.stamps !== undefined) {
           stampsGivenCount++;
           statStampsGiven.textContent = stampsGivenCount;
@@ -934,7 +955,7 @@
     setStaffKey(k);
     keyGate.classList.add("hidden");
     startScanner();
-    refreshStats();
+    refreshStats(true);
     loadEventsList();
   });
   keyInput.addEventListener("keydown", function(e){
@@ -1176,7 +1197,7 @@
   if (getStaffKey()) {
     keyGate.classList.add("hidden");
     startScanner();
-    refreshStats();
+    refreshStats(true);
     loadEventsList();
   } else {
     keyInput.focus();
@@ -1184,8 +1205,8 @@
   setInterval(function(){
     if (!getStaffKey() || mode !== "checkin") return;
     refreshStats();
-    if (attendeesOpen) loadAttendeesList();
-  }, 30000);
+    if (attendeesOpen) loadAttendeesListThrottled();
+  }, 90000);
 })();
 </script>
 
