@@ -26,8 +26,22 @@
 
   .card{
     width:100%; max-width:520px; background:#fff; border-radius:24px; padding:40px 32px;
-    box-shadow:0 20px 50px rgba(30,12,44,0.1);
+    box-shadow:0 20px 50px rgba(30,12,44,0.1); position:relative; overflow:hidden;
   }
+  .card::before{
+    content:""; position:absolute; left:0; right:0; top:0; height:6px;
+    background:linear-gradient(90deg, var(--coral), var(--yellow));
+  }
+  .event-chip{
+    display:inline-block; background:var(--purple-deeper); color:#fff; font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:12.5px; padding:6px 13px; border-radius:999px; margin-bottom:16px;
+  }
+  .event-chip[hidden]{ display:none; }
+  .section-title{
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:11.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--grey); margin:6px 0 16px; padding-bottom:8px; border-bottom:1px solid var(--line);
+  }
+  .section-title.gap{ margin-top:34px; }
   .eyebrow{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--coral); margin-bottom:10px; }
   h1{ font-size:26px; margin-bottom:8px; }
   .lead{ font-size:14.5px; color:var(--grey); margin-bottom:28px; }
@@ -40,33 +54,45 @@
     font-family:'Inter', sans-serif; font-size:14.5px;
   }
   .field textarea{ resize:vertical; min-height:80px; }
-  .field textarea:focus, .field input:focus{ outline:none; border-color:var(--coral); }
+  .field textarea:focus, .field input:focus{ outline:none; border-color:var(--coral); box-shadow:0 0 0 3px rgba(248,102,57,.15); }
+  .field textarea::placeholder, .field input::placeholder{ color:#A79FB0; }
   .field-row{ display:flex; gap:12px; }
   .field-row .field{ flex:1; }
 
-  .rating-scale{ display:flex; flex-wrap:wrap; gap:8px; }
+  .rating-scale{ display:grid; grid-template-columns:repeat(10, 1fr); gap:6px; }
   .rating-scale button{
-    width:36px; height:36px; border-radius:9px; border:1.5px solid var(--line); background:#fff;
-    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14px; cursor:pointer;
+    height:46px; border-radius:10px; border:1.5px solid var(--line); background:#fff;
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:15px; cursor:pointer;
     color:var(--ink); transition:all .15s ease;
   }
+  .rating-scale button:hover{ border-color:var(--coral); }
   .rating-scale button.active{ background:var(--yellow); border-color:var(--yellow); }
+  .rating-scale button.current{ background:var(--coral); border-color:var(--coral); color:#fff; transform:translateY(-2px); box-shadow:0 6px 14px rgba(248,102,57,.35); }
+  @media (max-width:480px){
+    .rating-scale{ grid-template-columns:repeat(5, 1fr); gap:8px; }
+    .card{ padding:32px 22px; }
+    .field-row{ flex-direction:column; gap:0; }
+  }
   .rating-scale-labels{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--grey); margin-top:6px; }
 
   .toggle-row{ display:flex; gap:10px; }
   .toggle-row button{
-    flex:1; padding:12px; border-radius:12px; border:1.5px solid var(--line); background:#fff;
-    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14px; cursor:pointer;
+    flex:1; padding:15px 12px; border-radius:12px; border:1.5px solid var(--line); background:#fff;
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;
     color:var(--ink); transition:all .15s ease;
   }
+  .toggle-row button:hover{ border-color:var(--purple-deeper); }
   .toggle-row button.active{ background:var(--purple-deeper); border-color:var(--purple-deeper); color:#fff; }
 
   .option-grid{ display:flex; flex-direction:column; gap:8px; }
   .option-row{
-    display:flex; align-items:center; gap:10px; padding:11px 13px; border:1.5px solid var(--line);
-    border-radius:12px; cursor:pointer; font-size:14.5px; transition:border-color .15s ease;
+    display:flex; align-items:center; gap:12px; padding:13px 14px; border:1.5px solid var(--line);
+    border-radius:12px; cursor:pointer; font-size:14.5px; transition:border-color .15s ease, background .15s ease;
   }
-  .option-row.checked{ border-color:var(--coral); }
+  .field .option-row{ display:flex; align-items:center; margin-bottom:0; font-family:'Inter', sans-serif; font-weight:500; font-size:14.5px; }
+  .option-row:hover{ border-color:rgba(248,102,57,.5); }
+  .option-row.checked{ border-color:var(--coral); background:rgba(248,102,57,.07); }
+  .option-row input:disabled + span{ opacity:.45; }
   .option-row input[type="checkbox"]{ width:18px; height:18px; flex-shrink:0; accent-color:var(--coral); }
   .option-counter{ font-size:12.5px; color:var(--grey); margin-top:8px; }
   .option-other-input{ margin-top:6px; display:none; }
@@ -75,16 +101,18 @@
   }
 
   .submit-btn{
-    width:100%; padding:16px; border-radius:12px; border:none; background:var(--coral); color:#fff;
-    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:15px; cursor:pointer;
-    margin-top:8px;
+    width:100%; padding:18px; border-radius:14px; border:none; background:var(--coral); color:#fff;
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:16px; cursor:pointer;
+    margin-top:12px; box-shadow:0 10px 24px rgba(248,102,57,.3); transition:transform .15s ease, box-shadow .15s ease;
   }
+  .submit-btn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 14px 28px rgba(248,102,57,.38); }
   .submit-btn:disabled{ opacity:.6; cursor:default; }
 
   .error{ color:#c0392b; font-size:13px; margin-top:8px; display:none; }
 
   #thanks{ display:none; text-align:center; }
   #thanks .big{ font-size:44px; margin-bottom:14px; }
+  #thanks{ padding:24px 0 8px; }
   #thanks h2{ font-size:22px; margin-bottom:8px; }
   #thanks p{ font-size:14.5px; color:var(--grey); }
 </style>
@@ -95,10 +123,12 @@
 
 <div class="card">
   <div id="formWrap">
+    <span class="event-chip" id="eventChip" hidden></span>
     <p class="eyebrow" data-cms="hero.eyebrow">Feedback</p>
     <h1 data-cms="hero.title">Com'è andata?</h1>
     <p class="lead" data-cms="hero.lead">Ci vuole meno di un minuto, e ci aiuti tantissimo a migliorare i prossimi eventi.</p>
 
+    <p class="section-title">Su di te</p>
     <div class="field-row">
       <div class="field">
         <label>Nome e cognome</label>
@@ -126,6 +156,7 @@
       <input type="text" id="fbFoundVia" placeholder="Un amico, Instagram, TikTok...">
     </div>
 
+    <p class="section-title gap">La tua serata</p>
     <div class="field">
       <label data-cms="q.rating">Come valuti l'evento nel complesso?</label>
       <div class="rating-scale" id="ratingScale"></div>
@@ -185,6 +216,11 @@
   var eventName = params.get("event") || null;
   var eventSlug = params.get("slug") || null;
   var formId = params.get("form") || null;
+  if (eventName) {
+    var chip = document.getElementById("eventChip");
+    chip.textContent = eventName;
+    chip.hidden = false;
+  }
 
   // Scala di valutazione 1-10 (10 pulsanti numerati, più leggibile di 10 stelle su mobile).
   var ratingScale = document.getElementById("ratingScale");
@@ -198,6 +234,7 @@
         rating = v;
         Array.prototype.forEach.call(ratingScale.children, function(b){
           b.classList.toggle("active", parseInt(b.dataset.v, 10) <= rating);
+          b.classList.toggle("current", parseInt(b.dataset.v, 10) === rating);
         });
         errorMsg.style.display = "none";
       });
