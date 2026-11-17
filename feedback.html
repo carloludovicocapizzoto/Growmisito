@@ -47,7 +47,8 @@
   .section-title.gap{ margin-top:34px; }
   .eyebrow{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--coral); margin-bottom:10px; }
   h1{ font-size:26px; margin-bottom:8px; }
-  .lead{ font-size:14.5px; color:var(--grey); margin-bottom:28px; }
+  .lead{ font-size:14.5px; color:var(--grey); margin-bottom:14px; }
+  .anon-note{ font-size:13px; color:var(--purple-deeper); background:rgba(62,13,93,.07); border-radius:10px; padding:9px 12px; margin-bottom:24px; }
 
   .field{ margin-bottom:24px; }
   .field label{ display:block; font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14px; margin-bottom:10px; }
@@ -132,18 +133,9 @@
     <h1 data-cms="hero.title" data-en="How did it go?">Com'è andata?</h1>
     <p class="lead" data-cms="hero.lead" data-en="It takes less than a minute, and it helps us a lot to improve our next events.">Ci vuole meno di un minuto, e ci aiuti tantissimo a migliorare i prossimi eventi.</p>
 
-    <p class="section-title" data-en="About you">Su di te</p>
-    <div class="field-row">
-      <div class="field">
-        <label data-en="Full name">Nome e cognome</label>
-        <input type="text" id="fbName" placeholder="Il tuo nome" data-en-ph="Your name">
-      </div>
-      <div class="field">
-        <label>Email</label>
-        <input type="email" id="fbEmail" placeholder="La tua email" data-en-ph="Your email">
-      </div>
-    </div>
+    <p class="anon-note"><span data-en="🔒 This form is anonymous: we don't ask for your name or email.">🔒 Il form è anonimo: non chiediamo nome né email.</span></p>
 
+    <p class="section-title" data-en="About you (optional)">Su di te (facoltativo)</p>
     <div class="field-row">
       <div class="field">
         <label data-en="Age (optional)">Età (facoltativo)</label>
@@ -270,8 +262,6 @@
     Array.prototype.forEach.call(document.querySelectorAll("#langToggle button"), function(b){
       b.classList.toggle("on", b.dataset.l === lang);
     });
-    var tn = document.getElementById("thanksTitle");
-    if (tn.dataset.name) tn.textContent = t("Grazie, ", "Thank you, ") + tn.dataset.name + "!";
   }
   if (eventName) {
     var chip = document.getElementById("eventChip");
@@ -442,7 +432,6 @@
     submitBtn.disabled = true;
     submitBtn.textContent = t("Invio...", "Sending...");
     try {
-      var name = document.getElementById("fbName").value.trim();
       var usingOptions = likedOptionsField.style.display !== "none";
       var res = await fetch("/api/feedback-submit", {
         method: "POST",
@@ -450,8 +439,6 @@
         body: JSON.stringify({
           formId: formId,
           eventName: eventName,
-          name: name,
-          email: document.getElementById("fbEmail").value.trim(),
           age: document.getElementById("fbAge").value.trim(),
           university: document.getElementById("fbUniversity").value.trim(),
           foundVia: document.getElementById("fbFoundVia").value.trim(),
@@ -464,11 +451,6 @@
         })
       });
       if (res.ok) {
-        if (name) {
-          var tn = document.getElementById("thanksTitle");
-          tn.dataset.name = name.split(" ")[0];
-          tn.textContent = t("Grazie, ", "Thank you, ") + tn.dataset.name + "!";
-        }
         document.getElementById("formWrap").style.display = "none";
         document.getElementById("thanks").style.display = "block";
       } else {

@@ -3296,8 +3296,10 @@ async function handleFeedbackSubmit(request, env) {
   await env.TICKETS.put(`feedback:${id}`, JSON.stringify({
     formId: String(body.formId || "").slice(0, 80) || null,
     eventName: String(body.eventName || "").slice(0, 200) || null,
-    name: String(body.name || "").slice(0, 200) || null,
-    email: String(body.email || "").slice(0, 200) || null,
+    // Form anonimo: nome e email non vengono più raccolti né salvati, anche se un client vecchio
+    // (pagina già aperta) li invia ancora. Restano null per non rompere staff-feedback e l'export.
+    name: null,
+    email: null,
     age: Number.isInteger(Number(body.age)) && Number(body.age) > 0 && Number(body.age) < 120 ? Number(body.age) : null,
     university: String(body.university || "").slice(0, 200) || null,
     foundVia: String(body.foundVia || "").slice(0, 300) || null,
